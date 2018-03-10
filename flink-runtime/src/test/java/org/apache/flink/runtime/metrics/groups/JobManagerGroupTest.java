@@ -44,7 +44,7 @@ public class JobManagerGroupTest extends TestLogger {
 	// ------------------------------------------------------------------------
 
 	@Test
-	public void addAndRemoveJobs() throws Exception {
+	public void addAndRemoveJobs() {
 		MetricRegistryImpl registry = new MetricRegistryImpl(MetricRegistryConfiguration.defaultMetricRegistryConfiguration());
 		final JobManagerMetricGroup group = new JobManagerMetricGroup(registry, "localhost");
 
@@ -72,11 +72,11 @@ public class JobManagerGroupTest extends TestLogger {
 		assertTrue(jmJobGroup21.isClosed());
 		assertEquals(0, group.numRegisteredJobMetricGroups());
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	@Test
-	public void testCloseClosesAll() throws Exception {
+	public void testCloseClosesAll() {
 		MetricRegistryImpl registry = new MetricRegistryImpl(MetricRegistryConfiguration.defaultMetricRegistryConfiguration());
 		final JobManagerMetricGroup group = new JobManagerMetricGroup(registry, "localhost");
 
@@ -94,7 +94,7 @@ public class JobManagerGroupTest extends TestLogger {
 		assertTrue(jmJobGroup11.isClosed());
 		assertTrue(jmJobGroup21.isClosed());
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	// ------------------------------------------------------------------------
@@ -102,18 +102,18 @@ public class JobManagerGroupTest extends TestLogger {
 	// ------------------------------------------------------------------------
 
 	@Test
-	public void testGenerateScopeDefault() throws Exception {
+	public void testGenerateScopeDefault() {
 		MetricRegistryImpl registry = new MetricRegistryImpl(MetricRegistryConfiguration.defaultMetricRegistryConfiguration());
 		JobManagerMetricGroup group = new JobManagerMetricGroup(registry, "localhost");
 
 		assertArrayEquals(new String[]{"localhost", "jobmanager"}, group.getScopeComponents());
 		assertEquals("localhost.jobmanager.name", group.getMetricIdentifier("name"));
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	@Test
-	public void testGenerateScopeCustom() throws Exception {
+	public void testGenerateScopeCustom() {
 		Configuration cfg = new Configuration();
 		cfg.setString(MetricOptions.SCOPE_NAMING_JM, "constant.<host>.foo.<host>");
 		MetricRegistryImpl registry = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(cfg));
@@ -123,7 +123,7 @@ public class JobManagerGroupTest extends TestLogger {
 		assertArrayEquals(new String[]{"constant", "host", "foo", "host"}, group.getScopeComponents());
 		assertEquals("constant.host.foo.host.name", group.getMetricIdentifier("name"));
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	@Test

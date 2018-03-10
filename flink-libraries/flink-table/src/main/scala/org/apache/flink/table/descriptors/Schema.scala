@@ -24,7 +24,6 @@ import org.apache.flink.table.descriptors.DescriptorProperties.{normalizeTableSc
 import org.apache.flink.table.descriptors.SchemaValidator._
 
 import scala.collection.mutable
-import scala.collection.JavaConverters._
 
 /**
   * Describes a schema of a table.
@@ -81,7 +80,7 @@ class Schema extends Descriptor {
     }
 
     val fieldProperties = mutable.LinkedHashMap[String, String]()
-    fieldProperties += (SCHEMA_TYPE -> fieldType)
+    fieldProperties += (TYPE -> fieldType)
 
     tableSchema += (fieldName -> fieldProperties)
 
@@ -101,7 +100,7 @@ class Schema extends Descriptor {
     lastField match {
       case None => throw new ValidationException("No field previously defined. Use field() before.")
       case Some(f) =>
-        tableSchema(f) += (SCHEMA_FROM -> originFieldName)
+        tableSchema(f) += (FROM -> originFieldName)
         lastField = None
     }
     this
@@ -116,7 +115,7 @@ class Schema extends Descriptor {
     lastField match {
       case None => throw new ValidationException("No field defined previously. Use field() before.")
       case Some(f) =>
-        tableSchema(f) += (SCHEMA_PROCTIME -> "true")
+        tableSchema(f) += (PROCTIME -> PROCTIME_VALUE_TRUE)
         lastField = None
     }
     this
@@ -133,7 +132,7 @@ class Schema extends Descriptor {
       case Some(f) =>
         val fieldProperties = new DescriptorProperties()
         rowtime.addProperties(fieldProperties)
-        tableSchema(f) ++= fieldProperties.asMap.asScala
+        tableSchema(f) ++= fieldProperties.asMap
         lastField = None
     }
     this
@@ -143,11 +142,12 @@ class Schema extends Descriptor {
     * Internal method for properties conversion.
     */
   final override private[flink] def addProperties(properties: DescriptorProperties): Unit = {
+    properties.putInt(SCHEMA_VERSION, 1)
     properties.putIndexedVariableProperties(
       SCHEMA,
       tableSchema.toSeq.map { case (name, props) =>
-        (Map(SCHEMA_NAME -> name) ++ props).asJava
-      }.asJava
+        Map(NAME -> name) ++ props
+      }
     )
   }
 }

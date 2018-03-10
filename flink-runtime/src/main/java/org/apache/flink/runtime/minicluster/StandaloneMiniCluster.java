@@ -23,16 +23,14 @@ import org.apache.flink.configuration.JobManagerOptions;
 import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.concurrent.Executors;
-import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServicesUtils;
 import org.apache.flink.runtime.jobmanager.JobManager;
 import org.apache.flink.runtime.jobmanager.MemoryArchivist;
 import org.apache.flink.runtime.messages.TaskManagerMessages;
-import org.apache.flink.runtime.metrics.MetricRegistryConfiguration;
 import org.apache.flink.runtime.metrics.MetricRegistryImpl;
+import org.apache.flink.runtime.metrics.MetricRegistryConfiguration;
 import org.apache.flink.runtime.taskmanager.TaskManager;
-import org.apache.flink.util.AutoCloseableAsync;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.Preconditions;
 
@@ -40,7 +38,6 @@ import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.pattern.Patterns;
 
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -58,7 +55,7 @@ import scala.concurrent.duration.FiniteDuration;
  * {@link FlinkMiniCluster}, because the remote environment cannot retrieve the current leader
  * session id.
  */
-public class StandaloneMiniCluster implements AutoCloseableAsync {
+public class StandaloneMiniCluster {
 
 	private static final String LOCAL_HOSTNAME = "localhost";
 
@@ -144,8 +141,7 @@ public class StandaloneMiniCluster implements AutoCloseableAsync {
 		return configuration;
 	}
 
-	@Override
-	public CompletableFuture<Void> closeAsync() {
+	public void close() throws Exception {
 		Exception exception = null;
 
 		try {
@@ -174,9 +170,7 @@ public class StandaloneMiniCluster implements AutoCloseableAsync {
 		}
 
 		if (exception != null) {
-			return FutureUtils.completedExceptionally(exception);
-		} else {
-			return CompletableFuture.completedFuture(null);
+			throw exception;
 		}
 	}
 }

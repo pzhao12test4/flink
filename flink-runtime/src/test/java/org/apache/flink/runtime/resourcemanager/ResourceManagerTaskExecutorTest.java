@@ -21,7 +21,6 @@ package org.apache.flink.runtime.resourcemanager;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.runtime.clusterframework.FlinkResourceManager;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
-import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.TestingHighAvailabilityServices;
 import org.apache.flink.runtime.instance.HardwareDescription;
@@ -31,7 +30,6 @@ import org.apache.flink.runtime.metrics.MetricRegistryImpl;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.rest.messages.taskmanager.TaskManagerInfo;
 import org.apache.flink.runtime.rpc.FatalErrorHandler;
-import org.apache.flink.runtime.rpc.RpcUtils;
 import org.apache.flink.runtime.rpc.TestingRpcService;
 import org.apache.flink.runtime.registration.RegistrationResponse;
 import org.apache.flink.runtime.rpc.exceptions.FencingTokenException;
@@ -106,7 +104,7 @@ public class ResourceManagerTaskExecutorTest extends TestLogger {
 
 	@After
 	public void teardown() throws Exception {
-		RpcUtils.terminateRpcService(rpcService, timeout);
+		rpcService.stopService();
 	}
 
 	/**
@@ -220,7 +218,6 @@ public class ResourceManagerTaskExecutorTest extends TestLogger {
 				slotManager,
 				metricRegistry,
 				jobLeaderIdService,
-				new ClusterInformation("localhost", 1234),
 				fatalErrorHandler);
 
 		resourceManager.start();

@@ -386,7 +386,8 @@ public class BufferingSink
 {% highlight scala %}
 class BufferingSink(threshold: Int = 0)
   extends SinkFunction[(String, Int)]
-    with CheckpointedFunction {
+    with CheckpointedFunction
+    with CheckpointedRestoring[List[(String, Int)]] {
 
   @transient
   private var checkpointedState: ListState[(String, Int)] = _
@@ -425,6 +426,9 @@ class BufferingSink(threshold: Int = 0)
     }
   }
 
+  override def restoreState(state: List[(String, Int)]): Unit = {
+    bufferedElements ++= state
+  }
 }
 {% endhighlight %}
 </div>

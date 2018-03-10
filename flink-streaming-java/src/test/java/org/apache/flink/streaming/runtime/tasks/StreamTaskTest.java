@@ -35,7 +35,6 @@ import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
-import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.checkpoint.SubtaskState;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
@@ -65,23 +64,21 @@ import org.apache.flink.runtime.operators.testutils.MockInputSplitProvider;
 import org.apache.flink.runtime.query.TaskKvStateRegistry;
 import org.apache.flink.runtime.state.AbstractKeyedStateBackend;
 import org.apache.flink.runtime.state.AbstractStateBackend;
-import org.apache.flink.runtime.state.CheckpointStorage;
 import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.DoneFuture;
+import org.apache.flink.runtime.state.KeyGroupRange;
 import org.apache.flink.runtime.state.KeyGroupStatePartitionStreamProvider;
 import org.apache.flink.runtime.state.KeyedStateHandle;
 import org.apache.flink.runtime.state.OperatorStateBackend;
 import org.apache.flink.runtime.state.OperatorStateHandle;
-import org.apache.flink.runtime.state.OperatorStreamStateHandle;
-import org.apache.flink.runtime.state.SnapshotResult;
 import org.apache.flink.runtime.state.StateBackendFactory;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StatePartitionStreamProvider;
-import org.apache.flink.runtime.state.TaskLocalStateStoreImpl;
+import org.apache.flink.runtime.state.StreamStateHandle;
+import org.apache.flink.runtime.state.TaskLocalStateStore;
 import org.apache.flink.runtime.state.TaskStateManager;
 import org.apache.flink.runtime.state.TaskStateManagerImpl;
 import org.apache.flink.runtime.state.TestTaskStateManager;
-import org.apache.flink.runtime.state.memory.MemoryBackendCheckpointStorage;
 import org.apache.flink.runtime.state.memory.MemoryStateBackend;
 import org.apache.flink.runtime.taskmanager.CheckpointResponder;
 import org.apache.flink.runtime.taskmanager.Task;
@@ -96,8 +93,7 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.InternalTimeServiceManager;
-import org.apache.flink.streaming.api.operators.OperatorSnapshotFinalizer;
-import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
+import org.apache.flink.streaming.api.operators.OperatorSnapshotResult;
 import org.apache.flink.streaming.api.operators.Output;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorStateContext;
@@ -150,6 +146,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyCollectionOf;
 import static org.mockito.Matchers.anyLong;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Matchers.eq;
@@ -223,7 +220,7 @@ public class StreamTaskTest extends TestLogger {
 	@Test
 	public void testStateBackendLoadingAndClosing() throws Exception {
 		Configuration taskManagerConfig = new Configuration();
-		taskManagerConfig.setString(CheckpointingOptions.STATE_BACKEND, TestMemoryStateBackendFactory.class.getName());
+		taskManagerConfig.setString(CheckpointingOptions.STATE_BACKEND, MockStateBackend.class.getName());
 
 		StreamConfig cfg = new StreamConfig(new Configuration());
 		cfg.setStateKeySerializer(mock(TypeSerializer.class));
@@ -255,7 +252,7 @@ public class StreamTaskTest extends TestLogger {
 	@Test
 	public void testStateBackendClosingOnFailure() throws Exception {
 		Configuration taskManagerConfig = new Configuration();
-		taskManagerConfig.setString(CheckpointingOptions.STATE_BACKEND, TestMemoryStateBackendFactory.class.getName());
+		taskManagerConfig.setString(CheckpointingOptions.STATE_BACKEND, MockStateBackend.class.getName());
 
 		StreamConfig cfg = new StreamConfig(new Configuration());
 		cfg.setStateKeySerializer(mock(TypeSerializer.class));
@@ -332,7 +329,8 @@ public class StreamTaskTest extends TestLogger {
 		TaskInfo mockTaskInfo = mock(TaskInfo.class);
 		when(mockTaskInfo.getTaskNameWithSubtasks()).thenReturn("foobar");
 		when(mockTaskInfo.getIndexOfThisSubtask()).thenReturn(0);
-		Environment mockEnvironment = new MockEnvironment();
+		Environment mockEnvironment = mock(Environment.class);
+		when(mockEnvironment.getTaskInfo()).thenReturn(mockTaskInfo);
 
 		StreamTask<?, ?> streamTask = new EmptyStreamTask(mockEnvironment);
 		CheckpointMetaData checkpointMetaData = new CheckpointMetaData(checkpointId, timestamp);
@@ -343,14 +341,14 @@ public class StreamTaskTest extends TestLogger {
 		StreamOperator<?> streamOperator3 = mock(StreamOperator.class);
 
 		// mock the returned snapshots
-		OperatorSnapshotFutures operatorSnapshotResult1 = mock(OperatorSnapshotFutures.class);
-		OperatorSnapshotFutures operatorSnapshotResult2 = mock(OperatorSnapshotFutures.class);
+		OperatorSnapshotResult operatorSnapshotResult1 = mock(OperatorSnapshotResult.class);
+		OperatorSnapshotResult operatorSnapshotResult2 = mock(OperatorSnapshotResult.class);
 
 		final Exception testException = new Exception("Test exception");
 
-		when(streamOperator1.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenReturn(operatorSnapshotResult1);
-		when(streamOperator2.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenReturn(operatorSnapshotResult2);
-		when(streamOperator3.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenThrow(testException);
+		when(streamOperator1.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenReturn(operatorSnapshotResult1);
+		when(streamOperator2.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenReturn(operatorSnapshotResult2);
+		when(streamOperator3.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenThrow(testException);
 
 		OperatorID operatorID1 = new OperatorID();
 		OperatorID operatorID2 = new OperatorID();
@@ -371,7 +369,6 @@ public class StreamTaskTest extends TestLogger {
 		Whitebox.setInternalState(streamTask, "operatorChain", operatorChain);
 		Whitebox.setInternalState(streamTask, "cancelables", new CloseableRegistry());
 		Whitebox.setInternalState(streamTask, "configuration", new StreamConfig(new Configuration()));
-		Whitebox.setInternalState(streamTask, "checkpointStorage", new MemoryBackendCheckpointStorage(new JobID(), null, null, Integer.MAX_VALUE));
 
 		CheckpointExceptionHandlerFactory checkpointExceptionHandlerFactory = new CheckpointExceptionHandlerFactory();
 		CheckpointExceptionHandler checkpointExceptionHandler =
@@ -383,7 +380,7 @@ public class StreamTaskTest extends TestLogger {
 		Whitebox.setInternalState(streamTask, "asynchronousCheckpointExceptionHandler", asyncCheckpointExceptionHandler);
 
 		try {
-			streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation());
+			streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpoint());
 			fail("Expected test exception here.");
 		} catch (Exception e) {
 			assertEquals(testException, e.getCause());
@@ -402,7 +399,12 @@ public class StreamTaskTest extends TestLogger {
 		final long checkpointId = 42L;
 		final long timestamp = 1L;
 
-		MockEnvironment mockEnvironment = new MockEnvironment();
+		TaskInfo mockTaskInfo = mock(TaskInfo.class);
+		when(mockTaskInfo.getTaskNameWithSubtasks()).thenReturn("foobar");
+		when(mockTaskInfo.getIndexOfThisSubtask()).thenReturn(0);
+		Environment mockEnvironment = mock(Environment.class);
+		when(mockEnvironment.getTaskInfo()).thenReturn(mockTaskInfo);
+
 		StreamTask<?, ?> streamTask = spy(new EmptyStreamTask(mockEnvironment));
 		CheckpointMetaData checkpointMetaData = new CheckpointMetaData(checkpointId, timestamp);
 
@@ -412,18 +414,18 @@ public class StreamTaskTest extends TestLogger {
 		StreamOperator<?> streamOperator3 = mock(StreamOperator.class);
 
 		// mock the new state operator snapshots
-		OperatorSnapshotFutures operatorSnapshotResult1 = mock(OperatorSnapshotFutures.class);
-		OperatorSnapshotFutures operatorSnapshotResult2 = mock(OperatorSnapshotFutures.class);
-		OperatorSnapshotFutures operatorSnapshotResult3 = mock(OperatorSnapshotFutures.class);
+		OperatorSnapshotResult operatorSnapshotResult1 = mock(OperatorSnapshotResult.class);
+		OperatorSnapshotResult operatorSnapshotResult2 = mock(OperatorSnapshotResult.class);
+		OperatorSnapshotResult operatorSnapshotResult3 = mock(OperatorSnapshotResult.class);
 
-		RunnableFuture<SnapshotResult<OperatorStateHandle>> failingFuture = mock(RunnableFuture.class);
+		RunnableFuture<OperatorStateHandle> failingFuture = mock(RunnableFuture.class);
 		when(failingFuture.get()).thenThrow(new ExecutionException(new Exception("Test exception")));
 
 		when(operatorSnapshotResult3.getOperatorStateRawFuture()).thenReturn(failingFuture);
 
-		when(streamOperator1.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenReturn(operatorSnapshotResult1);
-		when(streamOperator2.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenReturn(operatorSnapshotResult2);
-		when(streamOperator3.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenReturn(operatorSnapshotResult3);
+		when(streamOperator1.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenReturn(operatorSnapshotResult1);
+		when(streamOperator2.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenReturn(operatorSnapshotResult2);
+		when(streamOperator3.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenReturn(operatorSnapshotResult3);
 
 		OperatorID operatorID1 = new OperatorID();
 		OperatorID operatorID2 = new OperatorID();
@@ -443,7 +445,6 @@ public class StreamTaskTest extends TestLogger {
 		Whitebox.setInternalState(streamTask, "cancelables", new CloseableRegistry());
 		Whitebox.setInternalState(streamTask, "asyncOperationsThreadPool", new DirectExecutorService());
 		Whitebox.setInternalState(streamTask, "configuration", new StreamConfig(new Configuration()));
-		Whitebox.setInternalState(streamTask, "checkpointStorage", new MemoryBackendCheckpointStorage(new JobID(), null, null, Integer.MAX_VALUE));
 
 		CheckpointExceptionHandlerFactory checkpointExceptionHandlerFactory = new CheckpointExceptionHandlerFactory();
 		CheckpointExceptionHandler checkpointExceptionHandler =
@@ -454,8 +455,7 @@ public class StreamTaskTest extends TestLogger {
 			new StreamTask.AsyncCheckpointExceptionHandler(streamTask);
 		Whitebox.setInternalState(streamTask, "asynchronousCheckpointExceptionHandler", asyncCheckpointExceptionHandler);
 
-		mockEnvironment.setExpectedExternalFailureCause(Throwable.class);
-		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation());
+		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpoint());
 
 		verify(streamTask).handleAsyncException(anyString(), any(Throwable.class));
 
@@ -480,6 +480,12 @@ public class StreamTaskTest extends TestLogger {
 		final OneShotLatch acknowledgeCheckpointLatch = new OneShotLatch();
 		final OneShotLatch completeAcknowledge = new OneShotLatch();
 
+		TaskInfo mockTaskInfo = mock(TaskInfo.class);
+		when(mockTaskInfo.getTaskNameWithSubtasks()).thenReturn("foobar");
+		when(mockTaskInfo.getIndexOfThisSubtask()).thenReturn(0);
+		Environment mockEnvironment = mock(Environment.class);
+		when(mockEnvironment.getTaskInfo()).thenReturn(mockTaskInfo);
+
 		CheckpointResponder checkpointResponder = mock(CheckpointResponder.class);
 		doAnswer(new Answer() {
 			@Override
@@ -501,42 +507,46 @@ public class StreamTaskTest extends TestLogger {
 		TaskStateManager taskStateManager = new TaskStateManagerImpl(
 			new JobID(1L, 2L),
 			new ExecutionAttemptID(1L, 2L),
-			mock(TaskLocalStateStoreImpl.class),
+			mock(TaskLocalStateStore.class),
 			null,
 			checkpointResponder);
 
-		MockEnvironment mockEnvironment = new MockEnvironment(
-			"mock-task",
-			1024 * MemoryManager.DEFAULT_PAGE_SIZE,
-			null,
-			16,
-			taskStateManager);
+		when(mockEnvironment.getTaskStateManager()).thenReturn(taskStateManager);
 
 		StreamTask<?, ?> streamTask = new EmptyStreamTask(mockEnvironment);
 		CheckpointMetaData checkpointMetaData = new CheckpointMetaData(checkpointId, timestamp);
 
 		StreamOperator<?> streamOperator = mock(StreamOperator.class);
-		when(streamOperator.getOperatorID()).thenReturn(new OperatorID(42, 42));
 
 		KeyedStateHandle managedKeyedStateHandle = mock(KeyedStateHandle.class);
 		KeyedStateHandle rawKeyedStateHandle = mock(KeyedStateHandle.class);
-		OperatorStateHandle managedOperatorStateHandle = mock(OperatorStreamStateHandle.class);
-		OperatorStateHandle rawOperatorStateHandle = mock(OperatorStreamStateHandle.class);
+		OperatorStateHandle managedOperatorStateHandle = mock(OperatorStateHandle.class);
+		OperatorStateHandle rawOperatorStateHandle = mock(OperatorStateHandle.class);
 
-		OperatorSnapshotFutures operatorSnapshotResult = new OperatorSnapshotFutures(
-			DoneFuture.of(SnapshotResult.of(managedKeyedStateHandle)),
-			DoneFuture.of(SnapshotResult.of(rawKeyedStateHandle)),
-			DoneFuture.of(SnapshotResult.of(managedOperatorStateHandle)),
-			DoneFuture.of(SnapshotResult.of(rawOperatorStateHandle)));
+		OperatorSnapshotResult operatorSnapshotResult = new OperatorSnapshotResult(
+			new DoneFuture<>(managedKeyedStateHandle),
+			new DoneFuture<>(rawKeyedStateHandle),
+			new DoneFuture<>(managedOperatorStateHandle),
+			new DoneFuture<>(rawOperatorStateHandle));
 
-		when(streamOperator.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenReturn(operatorSnapshotResult);
+		when(streamOperator.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenReturn(operatorSnapshotResult);
 
 		StreamOperator<?>[] streamOperators = {streamOperator};
 
 		OperatorChain<Void, AbstractStreamOperator<Void>> operatorChain = mock(OperatorChain.class);
 		when(operatorChain.getAllOperators()).thenReturn(streamOperators);
 
-		CheckpointStorage checkpointStorage = new MemoryBackendCheckpointStorage(new JobID(), null, null, Integer.MAX_VALUE);
+		StreamStateHandle streamStateHandle = mock(StreamStateHandle.class);
+
+		CheckpointStreamFactory.CheckpointStateOutputStream outStream = mock(CheckpointStreamFactory.CheckpointStateOutputStream.class);
+
+		when(outStream.closeAndGetHandle()).thenReturn(streamStateHandle);
+
+		CheckpointStreamFactory mockStreamFactory = mock(CheckpointStreamFactory.class);
+		when(mockStreamFactory.createCheckpointStateOutputStream(anyLong(), anyLong())).thenReturn(outStream);
+
+		AbstractStateBackend mockStateBackend = mock(AbstractStateBackend.class);
+		when(mockStateBackend.createStreamFactory(any(JobID.class), anyString())).thenReturn(mockStreamFactory);
 
 		Whitebox.setInternalState(streamTask, "isRunning", true);
 		Whitebox.setInternalState(streamTask, "lock", new Object());
@@ -544,9 +554,9 @@ public class StreamTaskTest extends TestLogger {
 		Whitebox.setInternalState(streamTask, "cancelables", new CloseableRegistry());
 		Whitebox.setInternalState(streamTask, "asyncOperationsThreadPool", Executors.newFixedThreadPool(1));
 		Whitebox.setInternalState(streamTask, "configuration", new StreamConfig(new Configuration()));
-		Whitebox.setInternalState(streamTask, "checkpointStorage", checkpointStorage);
+		Whitebox.setInternalState(streamTask, "stateBackend", mockStateBackend);
 
-		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation());
+		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpoint());
 
 		acknowledgeCheckpointLatch.await();
 
@@ -564,10 +574,10 @@ public class StreamTaskTest extends TestLogger {
 		OperatorSubtaskState subtaskState = subtaskStates.getSubtaskStateMappings().iterator().next().getValue();
 
 		// check that the subtask state contains the expected state handles
-		assertEquals(StateObjectCollection.singleton(managedKeyedStateHandle), subtaskState.getManagedKeyedState());
-		assertEquals(StateObjectCollection.singleton(rawKeyedStateHandle), subtaskState.getRawKeyedState());
-		assertEquals(StateObjectCollection.singleton(managedOperatorStateHandle), subtaskState.getManagedOperatorState());
-		assertEquals(StateObjectCollection.singleton(rawOperatorStateHandle), subtaskState.getRawOperatorState());
+		assertEquals(Collections.singletonList(managedKeyedStateHandle), subtaskState.getManagedKeyedState());
+		assertEquals(Collections.singletonList(rawKeyedStateHandle), subtaskState.getRawKeyedState());
+		assertEquals(Collections.singletonList(managedOperatorStateHandle), subtaskState.getManagedOperatorState());
+		assertEquals(Collections.singletonList(rawOperatorStateHandle), subtaskState.getRawOperatorState());
 
 		// check that the state handles have not been discarded
 		verify(managedKeyedStateHandle, never()).discardState();
@@ -603,17 +613,32 @@ public class StreamTaskTest extends TestLogger {
 		final OneShotLatch createSubtask = new OneShotLatch();
 		final OneShotLatch completeSubtask = new OneShotLatch();
 
-		Environment mockEnvironment = spy(new MockEnvironment());
+		TaskInfo mockTaskInfo = mock(TaskInfo.class);
+		when(mockTaskInfo.getTaskNameWithSubtasks()).thenReturn("foobar");
+		when(mockTaskInfo.getIndexOfThisSubtask()).thenReturn(0);
+		Environment mockEnvironment = mock(Environment.class);
+		when(mockEnvironment.getTaskInfo()).thenReturn(mockTaskInfo);
 
-		whenNew(OperatorSnapshotFinalizer.class).
-			withAnyArguments().
-			thenAnswer((Answer<OperatorSnapshotFinalizer>) invocation -> {
-					createSubtask.trigger();
-					completeSubtask.await();
-					Object[] arguments = invocation.getArguments();
-					return new OperatorSnapshotFinalizer((OperatorSnapshotFutures) arguments[0]);
-				}
-			);
+		whenNew(OperatorSubtaskState.class).
+			withArguments(
+				anyCollectionOf(OperatorStateHandle.class),
+				anyCollectionOf(OperatorStateHandle.class),
+				anyCollectionOf(KeyedStateHandle.class),
+				anyCollectionOf(KeyedStateHandle.class)).
+			thenAnswer(new Answer<OperatorSubtaskState>() {
+				@Override
+			public OperatorSubtaskState answer(InvocationOnMock invocation) throws Throwable {
+				createSubtask.trigger();
+				completeSubtask.await();
+				Object[] arguments = invocation.getArguments();
+				return new OperatorSubtaskState(
+					(OperatorStateHandle) arguments[0],
+					(OperatorStateHandle) arguments[1],
+					(KeyedStateHandle) arguments[2],
+					(KeyedStateHandle) arguments[3]
+				);
+			}
+		});
 
 		StreamTask<?, ?> streamTask = new EmptyStreamTask(mockEnvironment);
 		CheckpointMetaData checkpointMetaData = new CheckpointMetaData(checkpointId, timestamp);
@@ -624,23 +649,33 @@ public class StreamTaskTest extends TestLogger {
 
 		KeyedStateHandle managedKeyedStateHandle = mock(KeyedStateHandle.class);
 		KeyedStateHandle rawKeyedStateHandle = mock(KeyedStateHandle.class);
-		OperatorStateHandle managedOperatorStateHandle = mock(OperatorStreamStateHandle.class);
-		OperatorStateHandle rawOperatorStateHandle = mock(OperatorStreamStateHandle.class);
+		OperatorStateHandle managedOperatorStateHandle = mock(OperatorStateHandle.class);
+		OperatorStateHandle rawOperatorStateHandle = mock(OperatorStateHandle.class);
 
-		OperatorSnapshotFutures operatorSnapshotResult = new OperatorSnapshotFutures(
-			DoneFuture.of(SnapshotResult.of(managedKeyedStateHandle)),
-			DoneFuture.of(SnapshotResult.of(rawKeyedStateHandle)),
-			DoneFuture.of(SnapshotResult.of(managedOperatorStateHandle)),
-			DoneFuture.of(SnapshotResult.of(rawOperatorStateHandle)));
+		OperatorSnapshotResult operatorSnapshotResult = new OperatorSnapshotResult(
+			new DoneFuture<>(managedKeyedStateHandle),
+			new DoneFuture<>(rawKeyedStateHandle),
+			new DoneFuture<>(managedOperatorStateHandle),
+			new DoneFuture<>(rawOperatorStateHandle));
 
-		when(streamOperator.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class))).thenReturn(operatorSnapshotResult);
+		when(streamOperator.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class))).thenReturn(operatorSnapshotResult);
 
 		StreamOperator<?>[] streamOperators = {streamOperator};
 
 		OperatorChain<Void, AbstractStreamOperator<Void>> operatorChain = mock(OperatorChain.class);
 		when(operatorChain.getAllOperators()).thenReturn(streamOperators);
 
-		CheckpointStorage checkpointStorage = new MemoryBackendCheckpointStorage(new JobID(), null, null, Integer.MAX_VALUE);
+		StreamStateHandle streamStateHandle = mock(StreamStateHandle.class);
+
+		CheckpointStreamFactory.CheckpointStateOutputStream outStream = mock(CheckpointStreamFactory.CheckpointStateOutputStream.class);
+
+		when(outStream.closeAndGetHandle()).thenReturn(streamStateHandle);
+
+		CheckpointStreamFactory mockStreamFactory = mock(CheckpointStreamFactory.class);
+		when(mockStreamFactory.createCheckpointStateOutputStream(anyLong(), anyLong())).thenReturn(outStream);
+
+		AbstractStateBackend mockStateBackend = mock(AbstractStateBackend.class);
+		when(mockStateBackend.createStreamFactory(any(JobID.class), anyString())).thenReturn(mockStreamFactory);
 
 		ExecutorService executor = Executors.newFixedThreadPool(1);
 
@@ -650,9 +685,9 @@ public class StreamTaskTest extends TestLogger {
 		Whitebox.setInternalState(streamTask, "cancelables", new CloseableRegistry());
 		Whitebox.setInternalState(streamTask, "asyncOperationsThreadPool", executor);
 		Whitebox.setInternalState(streamTask, "configuration", new StreamConfig(new Configuration()));
-		Whitebox.setInternalState(streamTask, "checkpointStorage", checkpointStorage);
+		Whitebox.setInternalState(streamTask, "stateBackend", mockStateBackend);
 
-		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation());
+		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpoint());
 
 		createSubtask.await();
 
@@ -689,7 +724,12 @@ public class StreamTaskTest extends TestLogger {
 		final long checkpointId = 42L;
 		final long timestamp = 1L;
 
-		Environment mockEnvironment = spy(new MockEnvironment());
+		TaskInfo mockTaskInfo = mock(TaskInfo.class);
+
+		when(mockTaskInfo.getTaskNameWithSubtasks()).thenReturn("foobar");
+		when(mockTaskInfo.getIndexOfThisSubtask()).thenReturn(0);
+
+		Environment mockEnvironment = mock(Environment.class);
 
 		// latch blocks until the async checkpoint thread acknowledges
 		final OneShotLatch checkpointCompletedLatch = new OneShotLatch();
@@ -714,11 +754,12 @@ public class StreamTaskTest extends TestLogger {
 		TaskStateManager taskStateManager = new TaskStateManagerImpl(
 			new JobID(1L, 2L),
 			new ExecutionAttemptID(1L, 2L),
-			mock(TaskLocalStateStoreImpl.class),
+			mock(TaskLocalStateStore.class),
 			null,
 			checkpointResponder);
 
 		when(mockEnvironment.getTaskStateManager()).thenReturn(taskStateManager);
+		when(mockEnvironment.getTaskInfo()).thenReturn(mockTaskInfo);
 
 		StreamTask<?, ?> streamTask = new EmptyStreamTask(mockEnvironment);
 		CheckpointMetaData checkpointMetaData = new CheckpointMetaData(checkpointId, timestamp);
@@ -731,8 +772,8 @@ public class StreamTaskTest extends TestLogger {
 		when(statelessOperator.getOperatorID()).thenReturn(operatorID);
 
 		// mock the returned empty snapshot result (all state handles are null)
-		OperatorSnapshotFutures statelessOperatorSnapshotResult = new OperatorSnapshotFutures();
-		when(statelessOperator.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class), any(CheckpointStreamFactory.class)))
+		OperatorSnapshotResult statelessOperatorSnapshotResult = new OperatorSnapshotResult();
+		when(statelessOperator.snapshotState(anyLong(), anyLong(), any(CheckpointOptions.class)))
 				.thenReturn(statelessOperatorSnapshotResult);
 
 		// set up the task
@@ -746,9 +787,8 @@ public class StreamTaskTest extends TestLogger {
 		Whitebox.setInternalState(streamTask, "cancelables", new CloseableRegistry());
 		Whitebox.setInternalState(streamTask, "configuration", new StreamConfig(new Configuration()));
 		Whitebox.setInternalState(streamTask, "asyncOperationsThreadPool", Executors.newCachedThreadPool());
-		Whitebox.setInternalState(streamTask, "checkpointStorage", new MemoryBackendCheckpointStorage(new JobID(), null, null, Integer.MAX_VALUE));
 
-		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation());
+		streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpoint());
 		checkpointCompletedLatch.await(30, TimeUnit.SECONDS);
 		streamTask.cancel();
 
@@ -815,13 +855,7 @@ public class StreamTaskTest extends TestLogger {
 	//  Test Utilities
 	// ------------------------------------------------------------------------
 
-	/**
-	 * Operator that does nothing.
-	 *
-	 * @param <T>
-	 * @param <OP>
-	 */
-	public static class NoOpStreamTask<T, OP extends StreamOperator<T>> extends StreamTask<T, OP> {
+	private static class NoOpStreamTask<T, OP extends StreamOperator<T>> extends StreamTask<T, OP> {
 
 		public NoOpStreamTask(Environment environment) {
 			super(environment, null);
@@ -870,7 +904,7 @@ public class StreamTaskTest extends TestLogger {
 		public Future<ExecutionState> notifyWhenExecutionState(ExecutionState executionState) {
 			synchronized (priorityQueue) {
 				if (this.executionState != null && this.executionState.ordinal() >= executionState.ordinal()) {
-					return Futures.<ExecutionState>successful(executionState);
+					return Futures.successful(executionState);
 				} else {
 					Promise<ExecutionState> promise = new Promise.DefaultPromise<ExecutionState>();
 
@@ -896,17 +930,9 @@ public class StreamTaskTest extends TestLogger {
 	}
 
 	public static Task createTask(
-		Class<? extends AbstractInvokable> invokable,
-		StreamConfig taskConfig,
-		Configuration taskManagerConfig) throws Exception {
-		return createTask(invokable, taskConfig, taskManagerConfig, new TestTaskStateManager());
-	}
-
-	public static Task createTask(
 			Class<? extends AbstractInvokable> invokable,
 			StreamConfig taskConfig,
-			Configuration taskManagerConfig,
-			TestTaskStateManager taskStateManager) throws Exception {
+			Configuration taskManagerConfig) throws Exception {
 
 		BlobCacheService blobService =
 			new BlobCacheService(mock(PermanentBlobCache.class), mock(TransientBlobCache.class));
@@ -957,7 +983,7 @@ public class StreamTaskTest extends TestLogger {
 			mock(IOManager.class),
 			network,
 			mock(BroadcastVariableManager.class),
-			taskStateManager,
+			new TestTaskStateManager(),
 			mock(TaskManagerActions.class),
 			mock(InputSplitProvider.class),
 			mock(CheckpointResponder.class),
@@ -1027,16 +1053,22 @@ public class StreamTaskTest extends TestLogger {
 	/**
 	 * Mocked state backend factory which returns mocks for the operator and keyed state backends.
 	 */
-	public static final class TestMemoryStateBackendFactory implements StateBackendFactory<AbstractStateBackend> {
+	public static final class MockStateBackend implements StateBackendFactory<AbstractStateBackend> {
 		private static final long serialVersionUID = 1L;
 
 		@Override
 		public AbstractStateBackend createFromConfig(Configuration config) {
-			return new TestSpyWrapperStateBackend(createInnerBackend(config));
-		}
+			return new MemoryStateBackend() {
+				@Override
+				public OperatorStateBackend createOperatorStateBackend(Environment env, String operatorIdentifier) throws Exception {
+					return spy(super.createOperatorStateBackend(env, operatorIdentifier));
+				}
 
-		protected AbstractStateBackend createInnerBackend(Configuration config) {
-			return new MemoryStateBackend();
+				@Override
+				public <K> AbstractKeyedStateBackend<K> createKeyedStateBackend(Environment env, JobID jobID, String operatorIdentifier, TypeSerializer<K> keySerializer, int numberOfKeyGroups, KeyGroupRange keyGroupRange, TaskKvStateRegistry kvStateRegistry) {
+					return spy(super.createKeyedStateBackend(env, jobID, operatorIdentifier, keySerializer, numberOfKeyGroups, keyGroupRange, kvStateRegistry));
+				}
+			};
 		}
 	}
 
@@ -1125,6 +1157,11 @@ public class StreamTaskTest extends TestLogger {
 					public InternalTimeServiceManager<?, ?> internalTimerServiceManager() {
 						InternalTimeServiceManager<?, ?> timeServiceManager = context.internalTimerServiceManager();
 						return timeServiceManager != null ? spy(timeServiceManager) : null;
+					}
+
+					@Override
+					public CheckpointStreamFactory checkpointStreamFactory() {
+						return context.checkpointStreamFactory();
 					}
 
 					@Override

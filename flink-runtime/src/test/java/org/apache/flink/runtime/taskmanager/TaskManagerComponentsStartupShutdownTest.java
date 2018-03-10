@@ -27,7 +27,6 @@ import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.clusterframework.FlinkResourceManager;
 import org.apache.flink.runtime.clusterframework.standalone.StandaloneResourceManager;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
-import org.apache.flink.runtime.concurrent.Executors;
 import org.apache.flink.runtime.execution.librarycache.FlinkUserCodeClassLoaders;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.highavailability.nonha.embedded.EmbeddedHaServices;
@@ -46,8 +45,6 @@ import org.apache.flink.runtime.metrics.MetricRegistryConfiguration;
 import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
 import org.apache.flink.runtime.metrics.groups.TaskManagerMetricGroup;
 import org.apache.flink.runtime.query.KvStateRegistry;
-import org.apache.flink.runtime.state.LocalRecoveryConfig;
-import org.apache.flink.runtime.state.TaskExecutorLocalStateStoresManager;
 import org.apache.flink.runtime.taskexecutor.TaskManagerConfiguration;
 import org.apache.flink.runtime.testingUtils.TestingUtils;
 import org.apache.flink.util.TestLogger;
@@ -124,12 +121,11 @@ public class TaskManagerComponentsStartupShutdownTest extends TestLogger {
 				Time.milliseconds(500),
 				Time.seconds(30),
 				Time.seconds(10),
+				1000000, // cleanup interval
 				config,
 				false, // exit-jvm-on-fatal-error
 				FlinkUserCodeClassLoaders.ResolveOrder.CHILD_FIRST,
-				new String[0],
-				null,
-				null);
+				new String[0]);
 
 			final int networkBufNum = 32;
 			// note: the network buffer memory configured here is not actually used below but set
@@ -156,15 +152,9 @@ public class TaskManagerComponentsStartupShutdownTest extends TestLogger {
 				netConf.partitionRequestInitialBackoff(),
 				netConf.partitionRequestMaxBackoff(),
 				netConf.networkBuffersPerChannel(),
-				netConf.floatingNetworkBuffersPerGate(),
-				true);
+				netConf.floatingNetworkBuffersPerGate());
 
 			network.start();
-
-			TaskExecutorLocalStateStoresManager storesManager = new TaskExecutorLocalStateStoresManager(
-				LocalRecoveryConfig.LocalRecoveryMode.DISABLED,
-				ioManager.getSpillingDirectories(),
-				Executors.directExecutor());
 
 			MetricRegistryConfiguration metricRegistryConfiguration = MetricRegistryConfiguration.fromConfiguration(config);
 
@@ -177,7 +167,6 @@ public class TaskManagerComponentsStartupShutdownTest extends TestLogger {
 				memManager,
 				ioManager,
 				network,
-				storesManager,
 				numberOfSlots,
 				highAvailabilityServices,
 				new TaskManagerMetricGroup(NoOpMetricRegistry.INSTANCE, connectionInfo.getHostname(), connectionInfo.getResourceID().getResourceIdString()));

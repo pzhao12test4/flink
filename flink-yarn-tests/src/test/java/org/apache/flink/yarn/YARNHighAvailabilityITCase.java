@@ -55,8 +55,6 @@ import java.util.concurrent.TimeUnit;
 
 import scala.concurrent.duration.FiniteDuration;
 
-import static org.junit.Assume.assumeTrue;
-
 /**
  * Tests that verify correct HA behavior.
  */
@@ -106,16 +104,10 @@ public class YARNHighAvailabilityITCase extends YarnTestBase {
 	 */
 	@Test
 	public void testMultipleAMKill() throws Exception {
-		assumeTrue("This test only works with the old actor based code.", !flip6);
 		final int numberKillingAttempts = numberApplicationAttempts - 1;
 		String confDirPath = System.getenv(ConfigConstants.ENV_FLINK_CONF_DIR);
 		final Configuration configuration = GlobalConfiguration.loadConfiguration();
-		TestingYarnClusterDescriptor flinkYarnClient = new TestingYarnClusterDescriptor(
-			configuration,
-			getYarnConfiguration(),
-			confDirPath,
-			getYarnClient(),
-			true);
+		TestingYarnClusterDescriptor flinkYarnClient = new TestingYarnClusterDescriptor(configuration, confDirPath);
 
 		Assert.assertNotNull("unable to get yarn client", flinkYarnClient);
 		flinkYarnClient.setLocalJarPath(new Path(flinkUberjar.getAbsolutePath()));

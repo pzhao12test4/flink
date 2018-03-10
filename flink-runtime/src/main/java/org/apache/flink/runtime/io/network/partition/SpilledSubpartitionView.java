@@ -18,6 +18,7 @@
 
 package org.apache.flink.runtime.io.network.partition;
 
+import org.apache.flink.runtime.io.network.partition.ResultSubpartition.BufferAndBacklog;
 import org.apache.flink.core.memory.MemorySegment;
 import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.runtime.io.disk.iomanager.BufferFileReader;
@@ -26,15 +27,11 @@ import org.apache.flink.runtime.io.disk.iomanager.SynchronousBufferFileReader;
 import org.apache.flink.runtime.io.network.buffer.Buffer;
 import org.apache.flink.runtime.io.network.buffer.BufferRecycler;
 import org.apache.flink.runtime.io.network.buffer.NetworkBuffer;
-import org.apache.flink.runtime.io.network.partition.ResultSubpartition.BufferAndBacklog;
 import org.apache.flink.runtime.util.event.NotificationListener;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import javax.annotation.concurrent.GuardedBy;
-
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Queue;
@@ -63,7 +60,6 @@ class SpilledSubpartitionView implements ResultSubpartitionView, NotificationLis
 	private final BufferFileWriter spillWriter;
 
 	/** The synchronous file reader to do the actual I/O. */
-	@GuardedBy("this")
 	private final BufferFileReader fileReader;
 
 	/** The buffer pool to read data into. */
@@ -77,10 +73,6 @@ class SpilledSubpartitionView implements ResultSubpartitionView, NotificationLis
 
 	/** Flag indicating whether all resources have been released. */
 	private AtomicBoolean isReleased = new AtomicBoolean();
-
-	/** The next buffer to hand out. */
-	@GuardedBy("this")
-	private Buffer nextBuffer;
 
 	/** Flag indicating whether a spill is still in progress. */
 	private volatile boolean isSpillInProgress = true;
@@ -105,7 +97,7 @@ class SpilledSubpartitionView implements ResultSubpartitionView, NotificationLis
 		// Otherwise, we notify only when the spill writer callback happens.
 		if (!spillWriter.registerAllRequestsProcessedListener(this)) {
 			isSpillInProgress = false;
-			availabilityListener.notifyDataAvailable();
+			availabilityListener.notifyBuffersAvailable(numberOfSpilledBuffers);
 			LOG.debug("No spilling in progress. Notified about {} available buffers.", numberOfSpilledBuffers);
 		} else {
 			LOG.debug("Spilling in progress. Waiting with notification about {} available buffers.", numberOfSpilledBuffers);
@@ -120,53 +112,28 @@ class SpilledSubpartitionView implements ResultSubpartitionView, NotificationLis
 	@Override
 	public void onNotification() {
 		isSpillInProgress = false;
-		availabilityListener.notifyDataAvailable();
+		availabilityListener.notifyBuffersAvailable(numberOfSpilledBuffers);
 		LOG.debug("Finished spilling. Notified about {} available buffers.", numberOfSpilledBuffers);
 	}
 
 	@Nullable
 	@Override
 	public BufferAndBacklog getNextBuffer() throws IOException, InterruptedException {
-		if (isSpillInProgress) {
+		if (fileReader.hasReachedEndOfFile() || isSpillInProgress) {
 			return null;
 		}
 
-		Buffer current;
-		boolean nextBufferIsEvent;
-		synchronized (this) {
-			if (nextBuffer == null) {
-				current = requestAndFillBuffer();
-			} else {
-				current = nextBuffer;
-			}
-			nextBuffer = requestAndFillBuffer();
-			nextBufferIsEvent = nextBuffer != null && !nextBuffer.isBuffer();
-		}
-
-		if (current == null) {
-			return null;
-		}
-
-		int newBacklog = parent.decreaseBuffersInBacklog(current);
-		return new BufferAndBacklog(current, newBacklog > 0 || nextBufferIsEvent, newBacklog, nextBufferIsEvent);
-	}
-
-	@Nullable
-	private Buffer requestAndFillBuffer() throws IOException, InterruptedException {
-		assert Thread.holdsLock(this);
-
-		if (fileReader.hasReachedEndOfFile()) {
-			return null;
-		}
 		// TODO This is fragile as we implicitly expect that multiple calls to
 		// this method don't happen before recycling buffers returned earlier.
 		Buffer buffer = bufferPool.requestBufferBlocking();
 		fileReader.readInto(buffer);
-		return buffer;
+
+		int newBacklog = parent.decreaseBuffersInBacklog(buffer);
+		return new BufferAndBacklog(buffer, newBacklog);
 	}
 
 	@Override
-	public void notifyDataAvailable() {
+	public void notifyBuffersAvailable(long buffers) throws IOException {
 		// We do the availability listener notification either directly on
 		// construction of this view (when everything has been spilled) or
 		// as soon as spilling is done and we are notified about it in the
@@ -187,14 +154,7 @@ class SpilledSubpartitionView implements ResultSubpartitionView, NotificationLis
 			// which can bring down the network.
 			spillWriter.closeAndDelete();
 
-			synchronized (this) {
-				fileReader.close();
-				if (nextBuffer != null) {
-					nextBuffer.recycleBuffer();
-					nextBuffer = null;
-				}
-			}
-
+			fileReader.close();
 			bufferPool.destroy();
 		}
 	}
@@ -202,29 +162,6 @@ class SpilledSubpartitionView implements ResultSubpartitionView, NotificationLis
 	@Override
 	public boolean isReleased() {
 		return parent.isReleased() || isReleased.get();
-	}
-
-	@Override
-	public boolean nextBufferIsEvent() {
-		synchronized (this) {
-			if (nextBuffer == null) {
-				try {
-					nextBuffer = requestAndFillBuffer();
-				} catch (Exception e) {
-					// we can ignore this here (we will get it again once getNextBuffer() is called)
-					return false;
-				}
-			}
-			return nextBuffer != null && !nextBuffer.isBuffer();
-		}
-	}
-
-	@Override
-	public synchronized boolean isAvailable() {
-		if (nextBuffer != null) {
-			return true;
-		}
-		return !fileReader.hasReachedEndOfFile();
 	}
 
 	@Override

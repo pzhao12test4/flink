@@ -18,6 +18,8 @@
 package org.apache.flink.test.streaming.runtime;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.co.CoMapFunction;
@@ -36,7 +38,6 @@ import static org.junit.Assert.assertEquals;
 /**
  * Integration tests for connected streams.
  */
-@SuppressWarnings("serial")
 public class SelfConnectionITCase extends AbstractTestBase {
 
 	/**
@@ -45,16 +46,25 @@ public class SelfConnectionITCase extends AbstractTestBase {
 	@Test
 	public void differentDataStreamSameChain() throws Exception {
 
-		TestListResultSink<String> resultSink = new TestListResultSink<>();
+		TestListResultSink<String> resultSink = new TestListResultSink<String>();
 
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(1);
 
 		DataStream<Integer> src = env.fromElements(1, 3, 5);
 
-		DataStream<String> stringMap = src.map(value -> "x " + value);
+		DataStream<String> stringMap = src.map(new MapFunction<Integer, String>() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public String map(Integer value) throws Exception {
+				return "x " + value;
+			}
+		});
 
 		stringMap.connect(src).map(new CoMapFunction<String, Integer, String>() {
+
+			private static final long serialVersionUID = 1L;
 
 			@Override
 			public String map1(String value) {
@@ -84,29 +94,54 @@ public class SelfConnectionITCase extends AbstractTestBase {
 	 * (This is not actually self-connect.)
 	 */
 	@Test
-	public void differentDataStreamDifferentChain() throws Exception {
+	public void differentDataStreamDifferentChain() {
 
-		TestListResultSink<String> resultSink = new TestListResultSink<>();
+		TestListResultSink<String> resultSink = new TestListResultSink<String>();
 
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 		env.setParallelism(3);
 
 		DataStream<Integer> src = env.fromElements(1, 3, 5).disableChaining();
 
-		DataStream<String> stringMap = src
-				.flatMap(new FlatMapFunction<Integer, String>() {
+		DataStream<String> stringMap = src.flatMap(new FlatMapFunction<Integer, String>() {
+
+			private static final long serialVersionUID = 1L;
 
 			@Override
 			public void flatMap(Integer value, Collector<String> out) throws Exception {
 				out.collect("x " + value);
 			}
-		}).keyBy(String::length);
+		}).keyBy(new KeySelector<String, Integer>() {
 
-		DataStream<Long> longMap = src
-				.map(value -> (long) (value + 1))
-				.keyBy(Long::intValue);
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public Integer getKey(String value) throws Exception {
+				return value.length();
+			}
+		});
+
+		DataStream<Long> longMap = src.map(new MapFunction<Integer, Long>() {
+
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public Long map(Integer value) throws Exception {
+				return (long) (value + 1);
+			}
+		}).keyBy(new KeySelector<Long, Integer>() {
+
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public Integer getKey(Long value) throws Exception {
+				return value.intValue();
+			}
+		});
 
 		stringMap.connect(longMap).map(new CoMapFunction<String, Long, String>() {
+
+			private static final long serialVersionUID = 1L;
 
 			@Override
 			public String map1(String value) {
@@ -119,7 +154,11 @@ public class SelfConnectionITCase extends AbstractTestBase {
 			}
 		}).addSink(resultSink);
 
-		env.execute();
+		try {
+			env.execute();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 
 		List<String> expected = Arrays.asList("x 1", "x 3", "x 5", "2", "4", "6");
 		List<String> result = resultSink.getResult();

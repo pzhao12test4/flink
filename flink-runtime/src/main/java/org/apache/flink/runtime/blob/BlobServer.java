@@ -27,7 +27,6 @@ import org.apache.flink.runtime.net.SSLUtils;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.FileUtils;
 import org.apache.flink.util.NetUtils;
-import org.apache.flink.util.ShutdownHookUtil;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -170,7 +169,7 @@ public class BlobServer extends Thread implements BlobService, BlobWriter, Perma
 			.schedule(new TransientBlobCleanupTask(blobExpiryTimes, readWriteLock.writeLock(),
 				storageDir, LOG), cleanupInterval, cleanupInterval);
 
-		this.shutdownHook = ShutdownHookUtil.addShutdownHook(this, getClass().getSimpleName(), LOG);
+		this.shutdownHook = BlobUtils.addShutdownHook(this, LOG);
 
 		if (config.getBoolean(BlobServerOptions.SSL_ENABLED)) {
 			try {
@@ -346,8 +345,19 @@ public class BlobServer extends Thread implements BlobService, BlobWriter, Perma
 				exception = ExceptionUtils.firstOrSuppressed(e, exception);
 			}
 
-			// Remove shutdown hook to prevent resource leaks
-			ShutdownHookUtil.removeShutdownHook(shutdownHook, getClass().getSimpleName(), LOG);
+			// Remove shutdown hook to prevent resource leaks, unless this is invoked by the
+			// shutdown hook itself
+			if (shutdownHook != null && shutdownHook != Thread.currentThread()) {
+				try {
+					Runtime.getRuntime().removeShutdownHook(shutdownHook);
+				}
+				catch (IllegalStateException e) {
+					// race, JVM is in shutdown already, we can safely ignore this
+				}
+				catch (Throwable t) {
+					LOG.warn("Exception while unregistering BLOB server's cleanup shutdown hook.", t);
+				}
+			}
 
 			if (LOG.isInfoEnabled()) {
 				LOG.info("Stopped BLOB server at {}:{}", serverSocket.getInetAddress().getHostAddress(), getPort());

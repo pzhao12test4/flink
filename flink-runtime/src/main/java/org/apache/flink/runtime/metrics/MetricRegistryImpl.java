@@ -19,7 +19,6 @@
 package org.apache.flink.runtime.metrics;
 
 import org.apache.flink.annotation.VisibleForTesting;
-import org.apache.flink.api.common.time.Time;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
@@ -29,35 +28,34 @@ import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.View;
 import org.apache.flink.metrics.reporter.MetricReporter;
 import org.apache.flink.metrics.reporter.Scheduled;
-import org.apache.flink.runtime.akka.ActorUtils;
 import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
-import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.metrics.dump.MetricQueryService;
 import org.apache.flink.runtime.metrics.groups.AbstractMetricGroup;
 import org.apache.flink.runtime.metrics.groups.FrontMetricGroup;
 import org.apache.flink.runtime.metrics.scope.ScopeFormats;
 import org.apache.flink.runtime.util.ExecutorThreadFactory;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.ExecutorUtils;
-import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.Preconditions;
 
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
+import akka.actor.Kill;
+import akka.pattern.Patterns;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.TimerTask;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+
+import scala.concurrent.Await;
+import scala.concurrent.Future;
+import scala.concurrent.duration.FiniteDuration;
 
 /**
  * A MetricRegistry keeps track of all registered {@link Metric Metrics}. It serves as the
@@ -68,14 +66,8 @@ public class MetricRegistryImpl implements MetricRegistry {
 
 	private final Object lock = new Object();
 
-	private final List<MetricReporter> reporters;
-	private final ScheduledExecutorService executor;
-
-	private final ScopeFormats scopeFormats;
-	private final char globalDelimiter;
-	private final List<Character> delimiters;
-
-	private final CompletableFuture<Void> terminationFuture;
+	private List<MetricReporter> reporters;
+	private ScheduledExecutorService executor;
 
 	@Nullable
 	private ActorRef queryService;
@@ -85,7 +77,9 @@ public class MetricRegistryImpl implements MetricRegistry {
 
 	private ViewUpdater viewUpdater;
 
-	private boolean isShutdown;
+	private final ScopeFormats scopeFormats;
+	private final char globalDelimiter;
+	private final List<Character> delimiters = new ArrayList<>();
 
 	/**
 	 * Creates a new MetricRegistry and starts the configured reporter.
@@ -93,12 +87,9 @@ public class MetricRegistryImpl implements MetricRegistry {
 	public MetricRegistryImpl(MetricRegistryConfiguration config) {
 		this.scopeFormats = config.getScopeFormats();
 		this.globalDelimiter = config.getDelimiter();
-		this.delimiters = new ArrayList<>(10);
-		this.terminationFuture = new CompletableFuture<>();
-		this.isShutdown = false;
 
 		// second, instantiate any custom configured reporters
-		this.reporters = new ArrayList<>(4);
+		this.reporters = new ArrayList<>();
 
 		List<Tuple2<String, Configuration>> reporterConfigurations = config.getReporterConfigurations();
 
@@ -235,72 +226,71 @@ public class MetricRegistryImpl implements MetricRegistry {
 	 */
 	public boolean isShutdown() {
 		synchronized (lock) {
-			return isShutdown;
+			return reporters == null && executor.isShutdown();
 		}
 	}
 
 	/**
 	 * Shuts down this registry and the associated {@link MetricReporter}.
-	 *
-	 * <p>NOTE: This operation is asynchronous and returns a future which is completed
-	 * once the shutdown operation has been completed.
-	 *
-	 * @return Future which is completed once the {@link MetricRegistryImpl}
-	 * is shut down.
 	 */
-	public CompletableFuture<Void> shutdown() {
+	public void shutdown() {
 		synchronized (lock) {
-			if (isShutdown) {
-				return terminationFuture;
-			} else {
-				isShutdown = true;
-				final Collection<CompletableFuture<Void>> terminationFutures = new ArrayList<>(3);
-				final Time gracePeriod = Time.seconds(1L);
+			Future<Boolean> stopFuture = null;
+			FiniteDuration stopTimeout = null;
 
-				if (queryService != null) {
-					final CompletableFuture<Void> queryServiceTerminationFuture = ActorUtils.nonBlockingShutDown(
-						gracePeriod.toMilliseconds(),
-						TimeUnit.MILLISECONDS,
-						queryService);
+			if (queryService != null) {
+				stopTimeout = new FiniteDuration(1L, TimeUnit.SECONDS);
 
-					terminationFutures.add(queryServiceTerminationFuture);
+				try {
+					stopFuture = Patterns.gracefulStop(queryService, stopTimeout);
+				} catch (IllegalStateException ignored) {
+					// this can happen if the underlying actor system has been stopped before shutting
+					// the metric registry down
+					// TODO: Pull the MetricQueryService actor out of the MetricRegistry
+					LOG.debug("The metric query service actor has already been stopped because the " +
+						"underlying ActorSystem has already been shut down.");
 				}
+			}
 
-				Throwable throwable = null;
+			if (reporters != null) {
 				for (MetricReporter reporter : reporters) {
 					try {
 						reporter.close();
 					} catch (Throwable t) {
-						throwable = ExceptionUtils.firstOrSuppressed(t, throwable);
+						LOG.warn("Metrics reporter did not shut down cleanly", t);
 					}
 				}
-				reporters.clear();
+				reporters = null;
+			}
+			shutdownExecutor();
 
-				if (throwable != null) {
-					terminationFutures.add(
-						FutureUtils.completedExceptionally(
-							new FlinkException("Could not shut down the metric reporters properly.", throwable)));
+			if (stopFuture != null) {
+				boolean stopped = false;
+
+				try {
+					stopped = Await.result(stopFuture, stopTimeout);
+				} catch (Exception e) {
+					LOG.warn("Query actor did not properly stop.", e);
 				}
 
-				final CompletableFuture<Void> executorShutdownFuture = ExecutorUtils.nonBlockingShutdown(
-					gracePeriod.toMilliseconds(),
-					TimeUnit.MILLISECONDS,
-					executor);
+				if (!stopped) {
+					// the query actor did not stop in time, let's kill him
+					queryService.tell(Kill.getInstance(), ActorRef.noSender());
+				}
+			}
+		}
+	}
 
-				terminationFutures.add(executorShutdownFuture);
+	private void shutdownExecutor() {
+		if (executor != null) {
+			executor.shutdown();
 
-				FutureUtils
-					.completeAll(terminationFutures)
-					.whenComplete(
-						(Void ignored, Throwable error) -> {
-							if (error != null) {
-								terminationFuture.completeExceptionally(error);
-							} else {
-								terminationFuture.complete(null);
-							}
-						});
-
-				return terminationFuture;
+			try {
+				if (!executor.awaitTermination(1L, TimeUnit.SECONDS)) {
+					executor.shutdownNow();
+				}
+			} catch (InterruptedException e) {
+				executor.shutdownNow();
 			}
 		}
 	}

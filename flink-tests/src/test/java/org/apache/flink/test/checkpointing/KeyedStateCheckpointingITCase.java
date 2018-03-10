@@ -24,9 +24,11 @@ import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.contrib.streaming.state.RocksDBStateBackend;
+import org.apache.flink.runtime.minicluster.LocalFlinkMiniCluster;
 import org.apache.flink.runtime.state.AbstractStateBackend;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.runtime.state.filesystem.FsStateBackend;
@@ -36,10 +38,11 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
 import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
-import org.apache.flink.test.util.MiniClusterResource;
+import org.apache.flink.streaming.util.TestStreamEnvironment;
 import org.apache.flink.util.TestLogger;
 
-import org.junit.ClassRule;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -77,17 +80,24 @@ public class KeyedStateCheckpointingITCase extends TestLogger {
 
 	// ------------------------------------------------------------------------
 
-	@ClassRule
-	public static final MiniClusterResource MINI_CLUSTER_RESOURCE = new MiniClusterResource(
-		new MiniClusterResource.MiniClusterResourceConfiguration(
-			getConfiguration(),
-			NUM_TASK_MANAGERS,
-			NUM_TASK_SLOTS));
+	private static LocalFlinkMiniCluster cluster;
 
-	private static Configuration getConfiguration() {
+	@BeforeClass
+	public static void startCluster() throws Exception {
 		Configuration config = new Configuration();
+		config.setInteger(ConfigConstants.LOCAL_NUMBER_TASK_MANAGER, NUM_TASK_MANAGERS);
+		config.setInteger(ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, NUM_TASK_SLOTS);
 		config.setLong(TaskManagerOptions.MANAGED_MEMORY_SIZE, 12L);
-		return config;
+
+		cluster = new LocalFlinkMiniCluster(config, false);
+		cluster.start();
+	}
+
+	@AfterClass
+	public static void stopCluster() throws Exception{
+		if (cluster != null) {
+			cluster.stop();
+		}
 	}
 
 	// ------------------------------------------------------------------------
@@ -140,7 +150,7 @@ public class KeyedStateCheckpointingITCase extends TestLogger {
 	protected void testProgramWithBackend(AbstractStateBackend stateBackend) throws Exception {
 		assertEquals("Broken test setup", 0, (NUM_STRINGS / 2) % NUM_KEYS);
 
-		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+		final StreamExecutionEnvironment env = new TestStreamEnvironment(cluster, PARALLELISM);
 		env.setParallelism(PARALLELISM);
 		env.enableCheckpointing(500);
 		env.getConfig().disableSysoutLogging();

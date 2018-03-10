@@ -23,12 +23,10 @@ import java.io._
 import akka.actor.ActorRef
 import akka.pattern.Patterns
 import org.apache.flink.runtime.minicluster.StandaloneMiniCluster
-import org.apache.flink.configuration.{ConfigConstants, Configuration, CoreOptions, GlobalConfiguration}
-import org.apache.flink.runtime.clusterframework.BootstrapTools
+import org.apache.flink.configuration.{ConfigConstants, Configuration, GlobalConfiguration}
 import org.apache.flink.test.util.TestBaseUtils
 import org.apache.flink.util.TestLogger
-import org.junit.rules.TemporaryFolder
-import org.junit._
+import org.junit.{AfterClass, Assert, BeforeClass, Ignore, Test}
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.FiniteDuration
@@ -37,11 +35,6 @@ import scala.tools.nsc.Settings
 class ScalaShellITCase extends TestLogger {
 
   import ScalaShellITCase._
-
-  val _temporaryFolder = new TemporaryFolder
-
-  @Rule
-  def temporaryFolder = _temporaryFolder
 
   /** Prevent re-creation of environment */
   @Test
@@ -276,8 +269,10 @@ class ScalaShellITCase extends TestLogger {
     val oldOut: PrintStream = System.out
     System.setOut(new PrintStream(baos))
 
-    val dir = temporaryFolder.newFolder()
-    BootstrapTools.writeConfiguration(configuration, new File(dir, "flink-conf.yaml"))
+    val confFile: String = classOf[ScalaShellLocalStartupITCase]
+      .getResource("/flink-conf.yaml")
+      .getFile
+    val confDir = new File(confFile).getAbsoluteFile.getParent
 
     val args = cluster match {
       case Some(cl) =>
@@ -286,9 +281,11 @@ class ScalaShellITCase extends TestLogger {
           cl.getHostname,
           Integer.toString(cl.getPort),
           "--configDir",
-          dir.getAbsolutePath)
+          confDir)
       case None => throw new IllegalStateException("Cluster has not been started.")
     }
+
+
 
     //start scala shell with initialized
     // buffered reader for testing
@@ -322,7 +319,6 @@ object ScalaShellITCase {
   @BeforeClass
   def beforeAll(): Unit = {
     configuration.setInteger(ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, parallelism)
-    configuration.setString(CoreOptions.MODE, CoreOptions.OLD_MODE)
 
     cluster = Option(new StandaloneMiniCluster(configuration))
   }
@@ -355,14 +351,14 @@ object ScalaShellITCase {
           case Some(ej) => new FlinkILoop(
             cl.getHostname,
             cl.getPort,
-            configuration,
+            GlobalConfiguration.loadConfiguration(),
             Option(Array(ej)),
             in, new PrintWriter(out))
 
           case None => new FlinkILoop(
             cl.getHostname,
             cl.getPort,
-            configuration,
+            GlobalConfiguration.loadConfiguration(),
             in, new PrintWriter(out))
         }
 

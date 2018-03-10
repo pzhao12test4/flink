@@ -24,44 +24,17 @@ import org.apache.flink.table.api.ValidationException
 import org.apache.flink.table.plan.stats.{ColumnStats, TableStats}
 import org.junit.Test
 
-import scala.collection.JavaConverters._
-
 class StatisticsTest extends DescriptorTestBase {
 
-  @Test(expected = classOf[ValidationException])
-  def testInvalidRowCount(): Unit = {
-    addPropertyAndVerify(descriptors().get(0), "statistics.row-count", "abx")
-  }
-
-  @Test(expected = classOf[ValidationException])
-  def testMissingName(): Unit = {
-    removePropertyAndVerify(descriptors().get(0), "statistics.columns.0.name")
-  }
-
-  // ----------------------------------------------------------------------------------------------
-
-  override def descriptors(): util.List[Descriptor] = {
-    val desc1 = Statistics()
+  @Test
+  def testStatistics(): Unit = {
+    val desc = Statistics()
       .rowCount(1000L)
       .columnStats("a", ColumnStats(1L, 2L, 3.0, 4, 5, 6))
       .columnAvgLength("b", 42.0)
       .columnNullCount("a", 300)
-
-    val map = new util.HashMap[String, ColumnStats]()
-    map.put("a", ColumnStats(null, 2L, 3.0, null, 5, 6))
-    val desc2 = Statistics()
-      .tableStats(TableStats(32L, map))
-
-    util.Arrays.asList(desc1, desc2)
-  }
-
-  override def validator(): DescriptorValidator = {
-    new StatisticsValidator()
-  }
-
-  override def properties(): util.List[util.Map[String, String]] = {
-    val props1 = Map(
-      "statistics.property-version" -> "1",
+    val expected = Seq(
+      "statistics.version" -> "1",
       "statistics.row-count" -> "1000",
       "statistics.columns.0.name" -> "a",
       "statistics.columns.0.distinct-count" -> "1",
@@ -73,9 +46,17 @@ class StatisticsTest extends DescriptorTestBase {
       "statistics.columns.1.name" -> "b",
       "statistics.columns.1.avg-length" -> "42.0"
     )
+    verifyProperties(desc, expected)
+  }
 
-    val props2 = Map(
-      "statistics.property-version" -> "1",
+  @Test
+  def testStatisticsTableStats(): Unit = {
+    val map = new util.HashMap[String, ColumnStats]()
+    map.put("a", ColumnStats(null, 2L, 3.0, null, 5, 6))
+    val desc = Statistics()
+      .tableStats(TableStats(32L, map))
+    val expected = Seq(
+      "statistics.version" -> "1",
       "statistics.row-count" -> "32",
       "statistics.columns.0.name" -> "a",
       "statistics.columns.0.null-count" -> "2",
@@ -83,7 +64,28 @@ class StatisticsTest extends DescriptorTestBase {
       "statistics.columns.0.max-value" -> "5",
       "statistics.columns.0.min-value" -> "6"
     )
+    verifyProperties(desc, expected)
+  }
 
-    util.Arrays.asList(props1.asJava, props2.asJava)
+  @Test(expected = classOf[ValidationException])
+  def testInvalidRowCount(): Unit = {
+    verifyInvalidProperty("statistics.row-count", "abx")
+  }
+
+  @Test(expected = classOf[ValidationException])
+  def testMissingName(): Unit = {
+    verifyMissingProperty("statistics.columns.0.name")
+  }
+
+  override def descriptor(): Descriptor = {
+    Statistics()
+      .rowCount(1000L)
+      .columnStats("a", ColumnStats(1L, 2L, 3.0, 4, 5, 6))
+      .columnAvgLength("b", 42.0)
+      .columnNullCount("a", 300)
+  }
+
+  override def validator(): DescriptorValidator = {
+    new StatisticsValidator()
   }
 }

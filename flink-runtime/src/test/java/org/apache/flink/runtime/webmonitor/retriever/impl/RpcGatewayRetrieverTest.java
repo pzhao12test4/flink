@@ -20,12 +20,11 @@ package org.apache.flink.runtime.webmonitor.retriever.impl;
 
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
-import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.leaderelection.TestingLeaderRetrievalService;
 import org.apache.flink.runtime.rpc.FencedRpcGateway;
 import org.apache.flink.runtime.rpc.RpcEndpoint;
 import org.apache.flink.runtime.rpc.RpcService;
 import org.apache.flink.runtime.rpc.RpcTimeout;
-import org.apache.flink.runtime.rpc.RpcUtils;
 import org.apache.flink.runtime.rpc.TestingRpcService;
 import org.apache.flink.util.TestLogger;
 
@@ -59,7 +58,9 @@ public class RpcGatewayRetrieverTest extends TestLogger {
 	@AfterClass
 	public static void teardown() throws InterruptedException, ExecutionException, TimeoutException {
 		if (rpcService != null) {
-			RpcUtils.terminateRpcService(rpcService, TIMEOUT);
+			rpcService.stopService();
+			rpcService.getTerminationFuture().get(TIMEOUT.toMilliseconds(), TimeUnit.MILLISECONDS);
+
 			rpcService = null;
 		}
 	}
@@ -74,7 +75,7 @@ public class RpcGatewayRetrieverTest extends TestLogger {
 		final UUID leaderSessionId = UUID.randomUUID();
 
 		RpcGatewayRetriever<UUID, DummyGateway> gatewayRetriever = new RpcGatewayRetriever<>(rpcService, DummyGateway.class, Function.identity(), 0, Time.milliseconds(0L));
-		SettableLeaderRetrievalService settableLeaderRetrievalService = new SettableLeaderRetrievalService();
+		TestingLeaderRetrievalService testingLeaderRetrievalService = new TestingLeaderRetrievalService();
 		DummyRpcEndpoint dummyRpcEndpoint = new DummyRpcEndpoint(rpcService, "dummyRpcEndpoint1", expectedValue);
 		DummyRpcEndpoint dummyRpcEndpoint2 = new DummyRpcEndpoint(rpcService, "dummyRpcEndpoint2", expectedValue2);
 		rpcService.registerGateway(dummyRpcEndpoint.getAddress(), dummyRpcEndpoint.getSelfGateway(DummyGateway.class));
@@ -84,13 +85,13 @@ public class RpcGatewayRetrieverTest extends TestLogger {
 			dummyRpcEndpoint.start();
 			dummyRpcEndpoint2.start();
 
-			settableLeaderRetrievalService.start(gatewayRetriever);
+			testingLeaderRetrievalService.start(gatewayRetriever);
 
 			final CompletableFuture<DummyGateway> gatewayFuture = gatewayRetriever.getFuture();
 
 			assertFalse(gatewayFuture.isDone());
 
-			settableLeaderRetrievalService.notifyListener(dummyRpcEndpoint.getAddress(), leaderSessionId);
+			testingLeaderRetrievalService.notifyListener(dummyRpcEndpoint.getAddress(), leaderSessionId);
 
 			final DummyGateway dummyGateway = gatewayFuture.get(TIMEOUT.toMilliseconds(), TimeUnit.MILLISECONDS);
 
@@ -98,7 +99,7 @@ public class RpcGatewayRetrieverTest extends TestLogger {
 			assertEquals(expectedValue, dummyGateway.foobar(TIMEOUT).get(TIMEOUT.toMilliseconds(), TimeUnit.MILLISECONDS));
 
 			// elect a new leader
-			settableLeaderRetrievalService.notifyListener(dummyRpcEndpoint2.getAddress(), leaderSessionId);
+			testingLeaderRetrievalService.notifyListener(dummyRpcEndpoint2.getAddress(), leaderSessionId);
 
 			final CompletableFuture<DummyGateway> gatewayFuture2 = gatewayRetriever.getFuture();
 			final DummyGateway dummyGateway2 = gatewayFuture2.get(TIMEOUT.toMilliseconds(), TimeUnit.MILLISECONDS);
@@ -137,11 +138,6 @@ public class RpcGatewayRetrieverTest extends TestLogger {
 		@Override
 		public UUID getFencingToken() {
 			return HighAvailabilityServices.DEFAULT_LEADER_ID;
-		}
-
-		@Override
-		public CompletableFuture<Void> postStop() {
-			return CompletableFuture.completedFuture(null);
 		}
 	}
 }

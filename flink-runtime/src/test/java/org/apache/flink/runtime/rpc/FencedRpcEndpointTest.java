@@ -60,7 +60,8 @@ public class FencedRpcEndpointTest extends TestLogger {
 	@AfterClass
 	public static void teardown() throws ExecutionException, InterruptedException, TimeoutException {
 		if (rpcService != null) {
-			RpcUtils.terminateRpcService(rpcService, timeout);
+			rpcService.stopService();
+			rpcService.getTerminationFuture().get(timeout.toMilliseconds(), TimeUnit.MILLISECONDS);
 		}
 	}
 
@@ -298,11 +299,6 @@ public class FencedRpcEndpointTest extends TestLogger {
 
 		protected FencedTestingEndpoint(RpcService rpcService, String value) {
 			this(rpcService, value, null);
-		}
-
-		@Override
-		public CompletableFuture<Void> postStop() {
-			return CompletableFuture.completedFuture(null);
 		}
 
 		protected FencedTestingEndpoint(RpcService rpcService, String value, UUID initialFencingToken) {

@@ -25,8 +25,6 @@ import org.apache.flink.runtime.rpc.TestingRpcService;
 import org.apache.flink.runtime.testingUtils.TestingUtils;
 import org.apache.flink.util.TestLogger;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
 import org.slf4j.LoggerFactory;
@@ -55,20 +53,6 @@ import static org.mockito.Mockito.when;
  */
 public class RetryingRegistrationTest extends TestLogger {
 
-	private TestingRpcService rpcService;
-
-	@Before
-	public void setup() {
-		rpcService = new TestingRpcService();
-	}
-
-	@After
-	public void tearDown() throws ExecutionException, InterruptedException {
-		if (rpcService != null) {
-			rpcService.stopService().get();
-		}
-	}
-
 	@Test
 	public void testSimpleSuccessfulRegistration() throws Exception {
 		final String testId = "laissez les bon temps roulez";
@@ -77,11 +61,12 @@ public class RetryingRegistrationTest extends TestLogger {
 
 		// an endpoint that immediately returns success
 		TestRegistrationGateway testGateway = new TestRegistrationGateway(new TestRegistrationSuccess(testId));
+		TestingRpcService rpc = new TestingRpcService();
 
 		try {
-			rpcService.registerGateway(testEndpointAddress, testGateway);
+			rpc.registerGateway(testEndpointAddress, testGateway);
 
-			TestRetryingRegistration registration = new TestRetryingRegistration(rpcService, testEndpointAddress, leaderId);
+			TestRetryingRegistration registration = new TestRetryingRegistration(rpc, testEndpointAddress, leaderId);
 			registration.startRegistration();
 
 			CompletableFuture<Tuple2<TestRegistrationGateway, TestRegistrationSuccess>> future = registration.getFuture();
@@ -99,6 +84,7 @@ public class RetryingRegistrationTest extends TestLogger {
 		}
 		finally {
 			testGateway.stop();
+			rpc.stopService();
 		}
 	}
 
@@ -187,12 +173,14 @@ public class RetryingRegistrationTest extends TestLogger {
 				new TestRegistrationSuccess(testId) // success
 		);
 
+		TestingRpcService rpc = new TestingRpcService();
+
 		try {
-			rpcService.registerGateway(testEndpointAddress, testGateway);
+			rpc.registerGateway(testEndpointAddress, testGateway);
 
 			final long initialTimeout = 20L;
 			TestRetryingRegistration registration = new TestRetryingRegistration(
-				rpcService,
+				rpc,
 				testEndpointAddress,
 				leaderId,
 				initialTimeout,
@@ -218,6 +206,7 @@ public class RetryingRegistrationTest extends TestLogger {
 			assertTrue("retries did not properly back off", elapsedMillis >= 3 * initialTimeout);
 		}
 		finally {
+			rpc.stopService();
 			testGateway.stop();
 		}
 	}
@@ -228,6 +217,8 @@ public class RetryingRegistrationTest extends TestLogger {
 		final String testEndpointAddress = "<test-address>";
 		final UUID leaderId = UUID.randomUUID();
 
+		TestingRpcService rpc = new TestingRpcService();
+
 		TestRegistrationGateway testGateway = new TestRegistrationGateway(
 				null, // timeout
 				new RegistrationResponse.Decline("no reason "),
@@ -236,9 +227,9 @@ public class RetryingRegistrationTest extends TestLogger {
 		);
 
 		try {
-			rpcService.registerGateway(testEndpointAddress, testGateway);
+			rpc.registerGateway(testEndpointAddress, testGateway);
 
-			TestRetryingRegistration registration = new TestRetryingRegistration(rpcService, testEndpointAddress, leaderId);
+			TestRetryingRegistration registration = new TestRetryingRegistration(rpc, testEndpointAddress, leaderId);
 
 			long started = System.nanoTime();
 			registration.startRegistration();
@@ -260,6 +251,7 @@ public class RetryingRegistrationTest extends TestLogger {
 		}
 		finally {
 			testGateway.stop();
+			rpc.stopService();
 		}
 	}
 
@@ -270,32 +262,39 @@ public class RetryingRegistrationTest extends TestLogger {
 		final String testEndpointAddress = "<test-address>";
 		final UUID leaderId = UUID.randomUUID();
 
-		// gateway that upon calls first responds with a failure, then with a success
-		TestRegistrationGateway testGateway = mock(TestRegistrationGateway.class);
+		TestingRpcService rpc = new TestingRpcService();
 
-		when(testGateway.registrationCall(any(UUID.class), anyLong())).thenReturn(
-				FutureUtils.completedExceptionally(new Exception("test exception")),
-				CompletableFuture.completedFuture(new TestRegistrationSuccess(testId)));
+		try {
+			// gateway that upon calls first responds with a failure, then with a success
+			TestRegistrationGateway testGateway = mock(TestRegistrationGateway.class);
 
-		rpcService.registerGateway(testEndpointAddress, testGateway);
+			when(testGateway.registrationCall(any(UUID.class), anyLong())).thenReturn(
+					FutureUtils.completedExceptionally(new Exception("test exception")),
+					CompletableFuture.completedFuture(new TestRegistrationSuccess(testId)));
 
-		TestRetryingRegistration registration = new TestRetryingRegistration(rpcService, testEndpointAddress, leaderId);
+			rpc.registerGateway(testEndpointAddress, testGateway);
 
-		long started = System.nanoTime();
-		registration.startRegistration();
+			TestRetryingRegistration registration = new TestRetryingRegistration(rpc, testEndpointAddress, leaderId);
 
-		CompletableFuture<Tuple2<TestRegistrationGateway, TestRegistrationSuccess>> future = registration.getFuture();
-		Tuple2<TestRegistrationGateway, TestRegistrationSuccess> success =
-				future.get(10, TimeUnit.SECONDS);
+			long started = System.nanoTime();
+			registration.startRegistration();
 
-		long finished = System.nanoTime();
-		long elapsedMillis = (finished - started) / 1000000;
+			CompletableFuture<Tuple2<TestRegistrationGateway, TestRegistrationSuccess>> future = registration.getFuture();
+			Tuple2<TestRegistrationGateway, TestRegistrationSuccess> success =
+					future.get(10, TimeUnit.SECONDS);
 
-		assertEquals(testId, success.f1.getCorrelationId());
+			long finished = System.nanoTime();
+			long elapsedMillis = (finished - started) / 1000000;
 
-		// validate that some retry-delay / back-off behavior happened
-		assertTrue("retries did not properly back off",
-				elapsedMillis >= TestRetryingRegistration.DELAY_ON_ERROR);
+			assertEquals(testId, success.f1.getCorrelationId());
+
+			// validate that some retry-delay / back-off behavior happened
+			assertTrue("retries did not properly back off",
+					elapsedMillis >= TestRetryingRegistration.DELAY_ON_ERROR);
+		}
+		finally {
+			rpc.stopService();
+		}
 	}
 
 	@Test
@@ -303,22 +302,29 @@ public class RetryingRegistrationTest extends TestLogger {
 		final String testEndpointAddress = "my-test-address";
 		final UUID leaderId = UUID.randomUUID();
 
-		CompletableFuture<RegistrationResponse> result = new CompletableFuture<>();
+		TestingRpcService rpc = new TestingRpcService();
 
-		TestRegistrationGateway testGateway = mock(TestRegistrationGateway.class);
-		when(testGateway.registrationCall(any(UUID.class), anyLong())).thenReturn(result);
+		try {
+			CompletableFuture<RegistrationResponse> result = new CompletableFuture<>();
 
-		rpcService.registerGateway(testEndpointAddress, testGateway);
+			TestRegistrationGateway testGateway = mock(TestRegistrationGateway.class);
+			when(testGateway.registrationCall(any(UUID.class), anyLong())).thenReturn(result);
 
-		TestRetryingRegistration registration = new TestRetryingRegistration(rpcService, testEndpointAddress, leaderId);
-		registration.startRegistration();
+			rpc.registerGateway(testEndpointAddress, testGateway);
 
-		// cancel and fail the current registration attempt
-		registration.cancel();
-		result.completeExceptionally(new TimeoutException());
+			TestRetryingRegistration registration = new TestRetryingRegistration(rpc, testEndpointAddress, leaderId);
+			registration.startRegistration();
 
-		// there should not be a second registration attempt
-		verify(testGateway, atMost(1)).registrationCall(any(UUID.class), anyLong());
+			// cancel and fail the current registration attempt
+			registration.cancel();
+			result.completeExceptionally(new TimeoutException());
+
+			// there should not be a second registration attempt
+			verify(testGateway, atMost(1)).registrationCall(any(UUID.class), anyLong());
+		}
+		finally {
+			rpc.stopService();
+		}
 	}
 
 	// ------------------------------------------------------------------------

@@ -214,11 +214,6 @@ trait ImplicitExpressionOperations {
   def varSamp = VarSamp(expr)
 
   /**
-    *  Returns multiset aggregate of a given expression.
-    */
-  def collect = Collect(expr)
-
-  /**
     * Converts a value to a given type.
     *
     * e.g. "42".cast(Types.INT) leads to 42.

@@ -32,8 +32,7 @@ public class MesosOptions {
 	 */
 	public static final ConfigOption<Integer> INITIAL_TASKS =
 		key("mesos.initial-tasks")
-			.defaultValue(0)
-			.withDescription("The initial workers to bring up when the master starts");
+			.defaultValue(0);
 
 	/**
 	 * The maximum number of failed Mesos tasks before entirely stopping
@@ -43,9 +42,7 @@ public class MesosOptions {
 	 */
 	public static final ConfigOption<Integer> MAX_FAILED_TASKS =
 		key("mesos.maximum-failed-tasks")
-			.defaultValue(-1)
-			.withDescription("The maximum number of failed workers before the cluster fails. May be set to -1 to disable" +
-				" this feature");
+			.defaultValue(-1);
 
 	/**
 	 * The Mesos master URL.
@@ -62,19 +59,14 @@ public class MesosOptions {
 	 */
 	public static final ConfigOption<String> MASTER_URL =
 		key("mesos.master")
-			.noDefaultValue()
-			.withDescription("The Mesos master URL. The value should be in one of the following forms:" +
-				" \"host:port\", \"zk://host1:port1,host2:port2,.../path\"," +
-				" \"zk://username:password@host1:port1,host2:port2,.../path\" or \"file:///path/to/file\"");
+			.noDefaultValue();
 
 	/**
 	 * The failover timeout for the Mesos scheduler, after which running tasks are automatically shut down.
 	 */
 	public static final ConfigOption<Integer> FAILOVER_TIMEOUT_SECONDS =
 		key("mesos.failover-timeout")
-			.defaultValue(600)
-			.withDescription("The failover timeout in seconds for the Mesos scheduler, after which running tasks are" +
-				" automatically shut down.");
+			.defaultValue(600);
 
 	/**
 	 * The config parameter defining the Mesos artifact server port to use.
@@ -82,42 +74,33 @@ public class MesosOptions {
 	 */
 	public static final ConfigOption<Integer> ARTIFACT_SERVER_PORT =
 		key("mesos.resourcemanager.artifactserver.port")
-			.defaultValue(0)
-			.withDescription("The config parameter defining the Mesos artifact server port to use. Setting the port to" +
-				" 0 will let the OS choose an available port.");
+			.defaultValue(0);
 
 	public static final ConfigOption<String> RESOURCEMANAGER_FRAMEWORK_NAME =
 		key("mesos.resourcemanager.framework.name")
-			.defaultValue("Flink")
-			.withDescription("Mesos framework name");
+			.defaultValue("Flink");
 
 	public static final ConfigOption<String> RESOURCEMANAGER_FRAMEWORK_ROLE =
 		key("mesos.resourcemanager.framework.role")
-			.defaultValue("*")
-			.withDescription("Mesos framework role definition");
+			.defaultValue("*");
 
 	public static final ConfigOption<String> RESOURCEMANAGER_FRAMEWORK_PRINCIPAL =
 		key("mesos.resourcemanager.framework.principal")
-			.noDefaultValue()
-			.withDescription("Mesos framework principal");
+			.noDefaultValue();
 
 	public static final ConfigOption<String> RESOURCEMANAGER_FRAMEWORK_SECRET =
 		key("mesos.resourcemanager.framework.secret")
-			.noDefaultValue()
-			.withDescription("Mesos framework secret");
+			.noDefaultValue();
 
 	public static final ConfigOption<String> RESOURCEMANAGER_FRAMEWORK_USER =
 		key("mesos.resourcemanager.framework.user")
-			.defaultValue("")
-			.withDescription("Mesos framework user");
+			.defaultValue("");
 
 	/**
 	 * Config parameter to override SSL support for the Artifact Server.
 	 */
 	public static final ConfigOption<Boolean> ARTIFACT_SERVER_SSL_ENABLED =
 		key("mesos.resourcemanager.artifactserver.ssl.enabled")
-			.defaultValue(true)
-			.withDescription("Enables SSL for the Flink artifact server. Note that security.ssl.enabled also needs to" +
-				" be set to true encryption to enable encryption.");
+			.defaultValue(true);
 
 }

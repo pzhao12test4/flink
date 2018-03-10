@@ -155,11 +155,6 @@ public class Kafka010ITCase extends KafkaConsumerTestBase {
 		runStartFromSpecificOffsets();
 	}
 
-	@Test(timeout = 60000)
-	public void testStartFromTimestamp() throws Exception {
-		runStartFromTimestamp();
-	}
-
 	// --- offset committing ---
 
 	@Test(timeout = 60000)
@@ -344,4 +339,5 @@ public class Kafka010ITCase extends KafkaConsumerTestBase {
 			return cnt > 1000L;
 		}
 	}
+
 }

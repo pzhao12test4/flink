@@ -18,15 +18,15 @@
 
 package org.apache.flink.runtime.operators.shipping;
 
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.runtime.io.network.api.writer.RecordWriter;
-import org.apache.flink.runtime.plugable.SerializationDelegate;
-import org.apache.flink.util.Collector;
-
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+
+import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.runtime.io.network.api.writer.RecordWriter;
+import org.apache.flink.runtime.plugable.SerializationDelegate;
+import org.apache.flink.util.Collector;
 
 /**
  * The OutputCollector collects records, and emits them to the  {@link RecordWriter}s.
@@ -81,8 +81,11 @@ public class OutputCollector<T> implements Collector<T> {
 	@Override
 	public void close() {
 		for (RecordWriter<?> writer : writers) {
-			writer.clearBuffers();
-			writer.flushAll();
+			try {
+				writer.flush();
+			} catch (IOException e) {
+				throw new RuntimeException(e.getMessage(), e);
+			}
 		}
 	}
 

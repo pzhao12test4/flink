@@ -211,12 +211,10 @@ public class LocalFileSystem extends FileSystem {
 
 		if (f.isDirectory()) {
 			final File[] files = f.listFiles();
-			if (files != null) {
-				for (File file : files) {
-					final boolean del = delete(file);
-					if (!del) {
-						return false;
-					}
+			for (File file : files) {
+				final boolean del = delete(file);
+				if (!del) {
+					return false;
 				}
 			}
 		} else {

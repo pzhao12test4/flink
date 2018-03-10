@@ -98,12 +98,10 @@ public class YARNSessionFIFOITCase extends YarnTestBase {
 		runner.join();
 		checkForLogString("The Flink YARN client has been started in detached mode");
 
-		if (!flip6) {
-			LOG.info("Waiting until two containers are running");
-			// wait until two containers are running
-			while (getRunningContainers() < 2) {
-				sleep(500);
-			}
+		LOG.info("Waiting until two containers are running");
+		// wait until two containers are running
+		while (getRunningContainers() < 2) {
+			sleep(500);
 		}
 
 		//additional sleep for the JM/TM to start and establish connection
@@ -231,13 +229,12 @@ public class YARNSessionFIFOITCase extends YarnTestBase {
 
 		String confDirPath = System.getenv(ConfigConstants.ENV_FLINK_CONF_DIR);
 		Configuration configuration = GlobalConfiguration.loadConfiguration();
+		final YarnClient yarnClient = YarnClient.createYarnClient();
 
 		try (final AbstractYarnClusterDescriptor clusterDescriptor = new YarnClusterDescriptor(
 			configuration,
-			getYarnConfiguration(),
 			confDirPath,
-			getYarnClient(),
-			true)) {
+			yarnClient)) {
 			Assert.assertNotNull("unable to get yarn client", clusterDescriptor);
 			clusterDescriptor.setLocalJarPath(new Path(flinkUberjar.getAbsolutePath()));
 			clusterDescriptor.addShipFiles(Arrays.asList(flinkLibFolder.listFiles()));

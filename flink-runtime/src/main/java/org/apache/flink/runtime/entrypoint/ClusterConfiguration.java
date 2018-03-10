@@ -27,18 +27,11 @@ import org.apache.flink.util.Preconditions;
 public class ClusterConfiguration {
 	private final String configDir;
 
-	private final int restPort;
-
-	public ClusterConfiguration(String configDir, int restPort) {
+	public ClusterConfiguration(String configDir) {
 		this.configDir = Preconditions.checkNotNull(configDir);
-		this.restPort = restPort;
 	}
 
 	public String getConfigDir() {
 		return configDir;
-	}
-
-	public int getRestPort() {
-		return restPort;
 	}
 }

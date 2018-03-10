@@ -40,9 +40,8 @@ import akka.actor.ActorSelection;
 import akka.actor.ActorSystem;
 import akka.actor.Address;
 import akka.actor.Identify;
-import akka.actor.PoisonPill;
+import akka.actor.Kill;
 import akka.actor.Props;
-import akka.actor.Terminated;
 import akka.dispatch.Futures;
 import akka.dispatch.Mapper;
 import akka.pattern.Patterns;
@@ -99,8 +98,6 @@ public class AkkaRpcService implements RpcService {
 
 	private final ScheduledExecutor internalScheduledExecutor;
 
-	private final CompletableFuture<Void> terminationFuture;
-
 	private volatile boolean stopped;
 
 	public AkkaRpcService(final ActorSystem actorSystem, final Time timeout) {
@@ -129,8 +126,6 @@ public class AkkaRpcService implements RpcService {
 		}
 
 		internalScheduledExecutor = new ActorSystemScheduledExecutorAdapter(actorSystem);
-
-		terminationFuture = new CompletableFuture<>();
 
 		stopped = false;
 	}
@@ -195,7 +190,7 @@ public class AkkaRpcService implements RpcService {
 	public <C extends RpcEndpoint & RpcGateway> RpcServer startServer(C rpcEndpoint) {
 		checkNotNull(rpcEndpoint, "rpc endpoint");
 
-		CompletableFuture<Void> terminationFuture = new CompletableFuture<>();
+		CompletableFuture<Boolean> terminationFuture = new CompletableFuture<>();
 		final Props akkaRpcActorProps;
 
 		if (rpcEndpoint instanceof FencedRpcEndpoint) {
@@ -308,7 +303,7 @@ public class AkkaRpcService implements RpcService {
 			}
 
 			if (rpcEndpoint != null) {
-				akkaClient.getActorRef().tell(PoisonPill.getInstance(), ActorRef.noSender());
+				akkaClient.getActorRef().tell(Kill.getInstance(), ActorRef.noSender());
 			} else {
 				LOG.debug("RPC endpoint {} already stopped or from different RPC service", selfGateway.getAddress());
 			}
@@ -316,40 +311,33 @@ public class AkkaRpcService implements RpcService {
 	}
 
 	@Override
-	public CompletableFuture<Void> stopService() {
+	public void stopService() {
+		LOG.info("Stopping Akka RPC service.");
+
 		synchronized (lock) {
 			if (stopped) {
-				return terminationFuture;
+				return;
 			}
 
 			stopped = true;
+
 		}
 
-		LOG.info("Stopping Akka RPC service.");
+		actorSystem.shutdown();
+		actorSystem.awaitTermination();
 
-		final CompletableFuture<Terminated> actorSytemTerminationFuture = FutureUtils.toJava(actorSystem.terminate());
+		synchronized (lock) {
+			actors.clear();
+		}
 
-		actorSytemTerminationFuture.whenComplete(
-			(Terminated ignored, Throwable throwable) -> {
-				synchronized (lock) {
-					actors.clear();
-				}
-
-				if (throwable != null) {
-					terminationFuture.completeExceptionally(throwable);
-				} else {
-					terminationFuture.complete(null);
-				}
-
-				LOG.info("Stopped Akka RPC service.");
-			});
-
-		return terminationFuture;
+		LOG.info("Stopped Akka RPC service.");
 	}
 
 	@Override
 	public CompletableFuture<Void> getTerminationFuture() {
-		return terminationFuture;
+		return CompletableFuture.runAsync(
+			actorSystem::awaitTermination,
+			getExecutor());
 	}
 
 	@Override

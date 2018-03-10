@@ -21,8 +21,6 @@ package org.apache.flink.runtime.concurrent;
 import org.apache.flink.core.testutils.ManuallyTriggeredDirectExecutor;
 import org.apache.flink.util.Preconditions;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Iterator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -62,10 +60,6 @@ public class ManuallyTriggeredScheduledExecutor extends ManuallyTriggeredDirectE
 	@Override
 	public ScheduledFuture<?> scheduleWithFixedDelay(Runnable command, long initialDelay, long delay, TimeUnit unit) {
 		return insertRunnable(command, true);
-	}
-
-	Collection<ScheduledFuture<?>> getScheduledTasks() {
-		return new ArrayList<>(scheduledTasks);
 	}
 
 	/**

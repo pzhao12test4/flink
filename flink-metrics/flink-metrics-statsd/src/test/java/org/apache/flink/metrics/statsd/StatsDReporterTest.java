@@ -73,7 +73,7 @@ public class StatsDReporterTest extends TestLogger {
 	 * Tests that the registered metrics' names don't contain invalid characters.
 	 */
 	@Test
-	public void testAddingMetrics() throws Exception {
+	public void testAddingMetrics() throws NoSuchFieldException, IllegalAccessException {
 		Configuration configuration = new Configuration();
 		String taskName = "testTask";
 		String jobName = "testJob:-!ax..?";
@@ -124,7 +124,7 @@ public class StatsDReporterTest extends TestLogger {
 
 		assertEquals(expectedCounterName, counters.get(myCounter));
 
-		metricRegistry.shutdown().get();
+		metricRegistry.shutdown();
 	}
 
 	/**
@@ -187,7 +187,7 @@ public class StatsDReporterTest extends TestLogger {
 
 		} finally {
 			if (registry != null) {
-				registry.shutdown().get();
+				registry.shutdown();
 			}
 
 			if (receiver != null) {
@@ -247,7 +247,7 @@ public class StatsDReporterTest extends TestLogger {
 
 		} finally {
 			if (registry != null) {
-				registry.shutdown().get();
+				registry.shutdown();
 			}
 
 			if (receiver != null) {

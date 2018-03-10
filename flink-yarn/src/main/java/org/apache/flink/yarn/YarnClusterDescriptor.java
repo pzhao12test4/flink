@@ -26,7 +26,6 @@ import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.ApplicationReport;
 import org.apache.hadoop.yarn.client.api.YarnClient;
-import org.apache.hadoop.yarn.conf.YarnConfiguration;
 
 /**
  * Default implementation of {@link AbstractYarnClusterDescriptor} which starts an {@link YarnApplicationMasterRunner}.
@@ -35,16 +34,9 @@ public class YarnClusterDescriptor extends AbstractYarnClusterDescriptor {
 
 	public YarnClusterDescriptor(
 			Configuration flinkConfiguration,
-			YarnConfiguration yarnConfiguration,
 			String configurationDirectory,
-			YarnClient yarnClient,
-			boolean sharedYarnClient) {
-		super(
-			flinkConfiguration,
-			yarnConfiguration,
-			configurationDirectory,
-			yarnClient,
-			sharedYarnClient);
+			YarnClient yarnClient) {
+		super(flinkConfiguration, configurationDirectory, yarnClient);
 	}
 
 	@Override
@@ -58,10 +50,7 @@ public class YarnClusterDescriptor extends AbstractYarnClusterDescriptor {
 	}
 
 	@Override
-	public YarnClusterClient deployJobCluster(
-			ClusterSpecification clusterSpecification,
-			JobGraph jobGraph,
-			boolean detached) {
+	public YarnClusterClient deployJobCluster(ClusterSpecification clusterSpecification, JobGraph jobGraph) {
 		throw new UnsupportedOperationException("Cannot deploy a per-job yarn cluster yet.");
 	}
 

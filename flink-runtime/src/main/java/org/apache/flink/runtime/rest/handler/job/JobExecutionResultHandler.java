@@ -21,6 +21,7 @@ package org.apache.flink.runtime.rest.handler.job;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.runtime.jobgraph.JobStatus;
+import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
 import org.apache.flink.runtime.rest.handler.AbstractRestHandler;
 import org.apache.flink.runtime.rest.handler.HandlerRequest;
@@ -74,8 +75,12 @@ public class JobExecutionResultHandler
 			jobStatus -> {
 				if (jobStatus.isGloballyTerminalState()) {
 					return gateway
-						.requestJobResult(jobId, timeout)
-						.thenApply(JobExecutionResultResponseBody::created);
+						.requestJob(jobId, timeout)
+						.thenApply(
+							executionGraph -> {
+								final JobResult jobResult = JobResult.createFrom(executionGraph);
+								return JobExecutionResultResponseBody.created(jobResult);
+							});
 				} else {
 					return CompletableFuture.completedFuture(
 						JobExecutionResultResponseBody.inProgress());

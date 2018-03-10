@@ -23,7 +23,6 @@ import org.apache.flink.api.common.time.Time;
 import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.executiongraph.ArchivedExecutionGraph;
 import org.apache.flink.runtime.jobgraph.JobStatus;
-import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
 import org.apache.flink.runtime.rest.handler.HandlerRequest;
 import org.apache.flink.runtime.rest.handler.RestHandlerException;
@@ -33,7 +32,6 @@ import org.apache.flink.runtime.rest.messages.JobMessageParameters;
 import org.apache.flink.runtime.rest.messages.job.JobExecutionResultResponseBody;
 import org.apache.flink.runtime.rest.messages.queue.QueueStatus;
 import org.apache.flink.runtime.webmonitor.TestingRestfulGateway;
-import org.apache.flink.testutils.category.Flip6;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.TestLogger;
 
@@ -41,7 +39,6 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseSt
 
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.experimental.categories.Category;
 
 import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
@@ -57,7 +54,6 @@ import static org.junit.Assert.fail;
 /**
  * Tests for {@link JobExecutionResultHandler}.
  */
-@Category(Flip6.class)
 public class JobExecutionResultHandlerTest extends TestLogger {
 
 	private static final JobID TEST_JOB_ID = new JobID();
@@ -113,10 +109,10 @@ public class JobExecutionResultHandlerTest extends TestLogger {
 					assertThat(jobId, equalTo(TEST_JOB_ID));
 					return CompletableFuture.completedFuture(jobStatus);
 				})
-			.setRequestJobResultFunction(
+			.setRequestJobFunction(
 				jobId -> {
 					assertThat(jobId, equalTo(TEST_JOB_ID));
-					return CompletableFuture.completedFuture(JobResult.createFrom(executionGraph));
+					return CompletableFuture.completedFuture(executionGraph);
 				}
 			)
 			.build();

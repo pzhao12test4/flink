@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.descriptors
 
-import org.apache.flink.table.descriptors.DescriptorProperties.toScala
+import org.apache.flink.table.api.ValidationException
 import org.apache.flink.table.descriptors.StatisticsValidator.{STATISTICS_COLUMNS, STATISTICS_ROW_COUNT, readColumnStats}
 import org.apache.flink.table.plan.stats.TableStats
 
@@ -27,9 +27,10 @@ import scala.collection.JavaConverters._
 /**
   * Common class for all descriptors describing a table source.
   */
-abstract class TableSourceDescriptor extends Descriptor {
+abstract class TableSourceDescriptor(connector: ConnectorDescriptor) extends Descriptor {
 
-  protected var connectorDescriptor: Option[ConnectorDescriptor] = None
+  protected val connectorDescriptor: ConnectorDescriptor = connector
+
   protected var formatDescriptor: Option[FormatDescriptor] = None
   protected var schemaDescriptor: Option[Schema] = None
   protected var statisticsDescriptor: Option[Statistics] = None
@@ -39,7 +40,18 @@ abstract class TableSourceDescriptor extends Descriptor {
     * Internal method for properties conversion.
     */
   override private[flink] def addProperties(properties: DescriptorProperties): Unit = {
-    connectorDescriptor.foreach(_.addProperties(properties))
+    connectorDescriptor.addProperties(properties)
+
+    // check for a format
+    if (connectorDescriptor.needsFormat() && formatDescriptor.isEmpty) {
+      throw new ValidationException(
+        s"The connector '$connectorDescriptor' requires a format description.")
+    } else if (!connectorDescriptor.needsFormat() && formatDescriptor.isDefined) {
+      throw new ValidationException(
+        s"The connector '$connectorDescriptor' does not require a format description " +
+          s"but '${formatDescriptor.get}' found.")
+    }
+
     formatDescriptor.foreach(_.addProperties(properties))
     schemaDescriptor.foreach(_.addProperties(properties))
     metaDescriptor.foreach(_.addProperties(properties))
@@ -51,7 +63,7 @@ abstract class TableSourceDescriptor extends Descriptor {
   protected def getTableStats: Option[TableStats] = {
       val normalizedProps = new DescriptorProperties()
       addProperties(normalizedProps)
-      val rowCount = toScala(normalizedProps.getOptionalLong(STATISTICS_ROW_COUNT))
+      val rowCount = normalizedProps.getLong(STATISTICS_ROW_COUNT).map(v => Long.box(v))
       rowCount match {
         case Some(cnt) =>
           val columnStats = readColumnStats(normalizedProps, STATISTICS_COLUMNS)

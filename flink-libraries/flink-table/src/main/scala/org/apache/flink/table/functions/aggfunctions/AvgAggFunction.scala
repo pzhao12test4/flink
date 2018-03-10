@@ -17,7 +17,7 @@
  */
 package org.apache.flink.table.functions.aggfunctions
 
-import java.math.{BigDecimal, BigInteger, MathContext}
+import java.math.{BigDecimal, BigInteger}
 import java.lang.{Iterable => JIterable}
 
 import org.apache.flink.api.common.typeinfo.{BasicTypeInfo, TypeInformation}
@@ -295,8 +295,7 @@ class DecimalAvgAccumulator extends JTuple2[BigDecimal, Long] {
 /**
   * Base class for built-in Big Decimal Avg aggregate function
   */
-class DecimalAvgAggFunction(context: MathContext)
-  extends AggregateFunction[BigDecimal, DecimalAvgAccumulator] {
+class DecimalAvgAggFunction extends AggregateFunction[BigDecimal, DecimalAvgAccumulator] {
 
   override def createAccumulator(): DecimalAvgAccumulator = {
     new DecimalAvgAccumulator
@@ -322,7 +321,7 @@ class DecimalAvgAggFunction(context: MathContext)
     if (acc.f1 == 0) {
       null.asInstanceOf[BigDecimal]
     } else {
-      acc.f0.divide(BigDecimal.valueOf(acc.f1), context)
+      acc.f0.divide(BigDecimal.valueOf(acc.f1))
     }
   }
 

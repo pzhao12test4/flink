@@ -18,35 +18,20 @@
 
 package org.apache.flink.table.descriptors
 
-import org.apache.flink.table.api.{StreamTableEnvironment, Table, TableException, ValidationException}
+import org.apache.flink.table.api.{StreamTableEnvironment, Table, TableException}
 import org.apache.flink.table.sources.{StreamTableSource, TableSource, TableSourceFactoryService}
 
 /**
   * Descriptor for specifying a table source in a streaming environment.
   */
 class StreamTableSourceDescriptor(tableEnv: StreamTableEnvironment, connector: ConnectorDescriptor)
-  extends TableSourceDescriptor {
-
-  connectorDescriptor = Some(connector)
-
-  override private[flink] def addProperties(properties: DescriptorProperties): Unit = {
-    // check for a format
-    if (connector.needsFormat() && formatDescriptor.isEmpty) {
-      throw new ValidationException(
-        s"The connector '$connector' requires a format description.")
-    } else if (!connector.needsFormat() && formatDescriptor.isDefined) {
-      throw new ValidationException(
-        s"The connector '$connector' does not require a format description " +
-          s"but '${formatDescriptor.get}' found.")
-    }
-    super.addProperties(properties)
-  }
+  extends TableSourceDescriptor(connector) {
 
   /**
     * Searches for the specified table source, configures it accordingly, and returns it.
     */
   def toTableSource: TableSource[_] = {
-    val source = TableSourceFactoryService.findAndCreateTableSource(this)
+    val source = TableSourceFactoryService.findTableSourceFactory(this)
     source match {
       case _: StreamTableSource[_] => source
       case _ => throw new TableException(

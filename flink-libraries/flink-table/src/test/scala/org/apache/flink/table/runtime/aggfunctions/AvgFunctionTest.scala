@@ -18,7 +18,7 @@
 
 package org.apache.flink.table.runtime.aggfunctions
 
-import java.math.{BigDecimal, MathContext}
+import java.math.BigDecimal
 
 import org.apache.flink.table.functions.AggregateFunction
 import org.apache.flink.table.functions.aggfunctions._
@@ -178,23 +178,17 @@ class DecimalAvgAggFunctionTest extends AggFunctionTestBase[BigDecimal, DecimalA
       null,
       null,
       null
-    ),
-    Seq(
-      new BigDecimal("0.3"),
-      new BigDecimal("0.3"),
-      new BigDecimal("0.4")
     )
   )
 
   override def expectedResults: Seq[BigDecimal] = Seq(
     BigDecimal.ZERO,
     BigDecimal.ONE,
-    null,
-    BigDecimal.ONE.divide(new BigDecimal("3"), MathContext.DECIMAL128)
+    null
   )
 
   override def aggregator: AggregateFunction[BigDecimal, DecimalAvgAccumulator] =
-    new DecimalAvgAggFunction(MathContext.DECIMAL128)
+    new DecimalAvgAggFunction()
 
   override def retractFunc = aggregator.getClass.getMethod("retract", accType, classOf[Any])
 }

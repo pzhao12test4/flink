@@ -23,8 +23,7 @@ import org.apache.flink.table.descriptors.FileSystemValidator.{CONNECTOR_PATH, C
 /**
   * Connector descriptor for a file system.
   */
-class FileSystem extends ConnectorDescriptor(
-    CONNECTOR_TYPE_VALUE, version = 1, formatNeeded = true) {
+class FileSystem extends ConnectorDescriptor(CONNECTOR_TYPE_VALUE, version = 1) {
 
   private var path: Option[String] = None
 
@@ -44,6 +43,8 @@ class FileSystem extends ConnectorDescriptor(
   override protected def addConnectorProperties(properties: DescriptorProperties): Unit = {
     path.foreach(properties.putString(CONNECTOR_PATH, _))
   }
+
+  override private[flink] def needsFormat() = true
 }
 
 /**

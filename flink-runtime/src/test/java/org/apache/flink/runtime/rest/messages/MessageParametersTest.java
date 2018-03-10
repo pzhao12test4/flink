@@ -104,12 +104,12 @@ public class MessageParametersTest extends TestLogger {
 		}
 
 		@Override
-		public JobID convertStringToValue(String value) {
+		public JobID convertValueFromString(String value) {
 			return JobID.fromHexString(value);
 		}
 
 		@Override
-		public String convertValueToString(JobID value) {
+		public String convertStringToValue(JobID value) {
 			return value.toString();
 		}
 	}

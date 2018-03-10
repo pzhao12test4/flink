@@ -29,7 +29,6 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.metrics.Counter;
-import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.runtime.state.DefaultOperatorStateBackend;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -57,7 +56,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -67,7 +65,6 @@ import java.util.regex.Pattern;
 
 import static org.apache.flink.streaming.connectors.kafka.internals.metrics.KafkaConsumerMetricConstants.COMMITS_FAILED_METRICS_COUNTER;
 import static org.apache.flink.streaming.connectors.kafka.internals.metrics.KafkaConsumerMetricConstants.COMMITS_SUCCEEDED_METRICS_COUNTER;
-import static org.apache.flink.streaming.connectors.kafka.internals.metrics.KafkaConsumerMetricConstants.KAFKA_CONSUMER_METRICS_GROUP;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -153,9 +150,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	/** Specific startup offsets; only relevant when startup mode is {@link StartupMode#SPECIFIC_OFFSETS}. */
 	private Map<KafkaTopicPartition, Long> specificStartupOffsets;
 
-	/** Timestamp to determine startup offsets; only relevant when startup mode is {@link StartupMode#TIMESTAMP}. */
-	private Long startupOffsetsTimestamp;
-
 	// ------------------------------------------------------------------------
 	//  runtime state (used individually by each parallel subtask)
 	// ------------------------------------------------------------------------
@@ -198,13 +192,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	//  internal metrics
 	// ------------------------------------------------------------------------
 
-	/**
-	 * Flag indicating whether or not metrics should be exposed.
-	 * If {@code true}, offset metrics (e.g. current offset, committed offset) and
-	 * Kafka-shipped metrics will be registered.
-	 */
-	private final boolean useMetrics;
-
 	/** Counter for successful Kafka offset commits. */
 	private transient Counter successfulCommits;
 
@@ -234,8 +221,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 			List<String> topics,
 			Pattern topicPattern,
 			KeyedDeserializationSchema<T> deserializer,
-			long discoveryIntervalMillis,
-			boolean useMetrics) {
+			long discoveryIntervalMillis) {
 		this.topicsDescriptor = new KafkaTopicsDescriptor(topics, topicPattern);
 		this.deserializer = checkNotNull(deserializer, "valueDeserializer");
 
@@ -243,8 +229,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 			discoveryIntervalMillis == PARTITION_DISCOVERY_DISABLED || discoveryIntervalMillis >= 0,
 			"Cannot define a negative value for the topic / partition discovery interval.");
 		this.discoveryIntervalMillis = discoveryIntervalMillis;
-
-		this.useMetrics = useMetrics;
 	}
 
 	// ------------------------------------------------------------------------
@@ -339,7 +323,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 * Specifies the consumer to start reading from the earliest offset for all partitions.
 	 * This lets the consumer ignore any committed group offsets in Zookeeper / Kafka brokers.
 	 *
-	 * <p>This method does not affect where partitions are read from when the consumer is restored
+	 * <p>This method does not effect where partitions are read from when the consumer is restored
 	 * from a checkpoint or savepoint. When the consumer is restored from a checkpoint or
 	 * savepoint, only the offsets in the restored state will be used.
 	 *
@@ -347,7 +331,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 */
 	public FlinkKafkaConsumerBase<T> setStartFromEarliest() {
 		this.startupMode = StartupMode.EARLIEST;
-		this.startupOffsetsTimestamp = null;
 		this.specificStartupOffsets = null;
 		return this;
 	}
@@ -356,7 +339,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 * Specifies the consumer to start reading from the latest offset for all partitions.
 	 * This lets the consumer ignore any committed group offsets in Zookeeper / Kafka brokers.
 	 *
-	 * <p>This method does not affect where partitions are read from when the consumer is restored
+	 * <p>This method does not effect where partitions are read from when the consumer is restored
 	 * from a checkpoint or savepoint. When the consumer is restored from a checkpoint or
 	 * savepoint, only the offsets in the restored state will be used.
 	 *
@@ -364,41 +347,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 */
 	public FlinkKafkaConsumerBase<T> setStartFromLatest() {
 		this.startupMode = StartupMode.LATEST;
-		this.startupOffsetsTimestamp = null;
-		this.specificStartupOffsets = null;
-		return this;
-	}
-
-	/**
-	 * Specifies the consumer to start reading partitions from a specified timestamp.
-	 * The specified timestamp must be before the current timestamp.
-	 * This lets the consumer ignore any committed group offsets in Zookeeper / Kafka brokers.
-	 *
-	 * <p>The consumer will look up the earliest offset whose timestamp is greater than or equal
-	 * to the specific timestamp from Kafka. If there's no such offset, the consumer will use the
-	 * latest offset to read data from kafka.
-	 *
-	 * <p>This method does not affect where partitions are read from when the consumer is restored
-	 * from a checkpoint or savepoint. When the consumer is restored from a checkpoint or
-	 * savepoint, only the offsets in the restored state will be used.
-	 *
-	 * @param startupOffsetsTimestamp timestamp for the startup offsets, as milliseconds from epoch.
-	 *
-	 * @return The consumer object, to allow function chaining.
-	 */
-	// NOTE -
-	// This method is implemented in the base class because this is where the startup logging and verifications live.
-	// However, it is not publicly exposed since only newer Kafka versions support the functionality.
-	// Version-specific subclasses which can expose the functionality should override and allow public access.
-	protected FlinkKafkaConsumerBase<T> setStartFromTimestamp(long startupOffsetsTimestamp) {
-		checkArgument(startupOffsetsTimestamp >= 0, "The provided value for the startup offsets timestamp is invalid.");
-
-		long currentTimestamp = System.currentTimeMillis();
-		checkArgument(startupOffsetsTimestamp <= currentTimestamp,
-			"Startup time[%s] must be before current time[%s].", startupOffsetsTimestamp, currentTimestamp);
-
-		this.startupMode = StartupMode.TIMESTAMP;
-		this.startupOffsetsTimestamp = startupOffsetsTimestamp;
 		this.specificStartupOffsets = null;
 		return this;
 	}
@@ -409,7 +357,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 * properties. If no offset can be found for a partition, the behaviour in "auto.offset.reset"
 	 * set in the configuration properties will be used for the partition.
 	 *
-	 * <p>This method does not affect where partitions are read from when the consumer is restored
+	 * <p>This method does not effect where partitions are read from when the consumer is restored
 	 * from a checkpoint or savepoint. When the consumer is restored from a checkpoint or
 	 * savepoint, only the offsets in the restored state will be used.
 	 *
@@ -417,7 +365,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 */
 	public FlinkKafkaConsumerBase<T> setStartFromGroupOffsets() {
 		this.startupMode = StartupMode.GROUP_OFFSETS;
-		this.startupOffsetsTimestamp = null;
 		this.specificStartupOffsets = null;
 		return this;
 	}
@@ -436,7 +383,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 * offsets but still no group offset could be found for it, then the "auto.offset.reset" behaviour set in the
 	 * configuration properties will be used for the partition
 	 *
-	 * <p>This method does not affect where partitions are read from when the consumer is restored
+	 * <p>This method does not effect where partitions are read from when the consumer is restored
 	 * from a checkpoint or savepoint. When the consumer is restored from a checkpoint or
 	 * savepoint, only the offsets in the restored state will be used.
 	 *
@@ -444,7 +391,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 	 */
 	public FlinkKafkaConsumerBase<T> setStartFromSpecificOffsets(Map<KafkaTopicPartition, Long> specificStartupOffsets) {
 		this.startupMode = StartupMode.SPECIFIC_OFFSETS;
-		this.startupOffsetsTimestamp = null;
 		this.specificStartupOffsets = checkNotNull(specificStartupOffsets);
 		return this;
 	}
@@ -499,57 +445,28 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 				getRuntimeContext().getIndexOfThisSubtask(), subscribedPartitionsToStartOffsets.size(), subscribedPartitionsToStartOffsets);
 		} else {
 			// use the partition discoverer to fetch the initial seed partitions,
-			// and set their initial offsets depending on the startup mode.
-			// for SPECIFIC_OFFSETS and TIMESTAMP modes, we set the specific offsets now;
-			// for other modes (EARLIEST, LATEST, and GROUP_OFFSETS), the offset is lazily determined
-			// when the partition is actually read.
-			switch (startupMode) {
-				case SPECIFIC_OFFSETS:
+			// and set their initial offsets depending on the startup mode
+			for (KafkaTopicPartition seedPartition : allPartitions) {
+				if (startupMode != StartupMode.SPECIFIC_OFFSETS) {
+					subscribedPartitionsToStartOffsets.put(seedPartition, startupMode.getStateSentinel());
+				} else {
 					if (specificStartupOffsets == null) {
-						throw new IllegalStateException(
+						throw new IllegalArgumentException(
 							"Startup mode for the consumer set to " + StartupMode.SPECIFIC_OFFSETS +
-								", but no specific offsets were specified.");
+								", but no specific offsets were specified");
 					}
 
-					for (KafkaTopicPartition seedPartition : allPartitions) {
-						Long specificOffset = specificStartupOffsets.get(seedPartition);
-						if (specificOffset != null) {
-							// since the specified offsets represent the next record to read, we subtract
-							// it by one so that the initial state of the consumer will be correct
-							subscribedPartitionsToStartOffsets.put(seedPartition, specificOffset - 1);
-						} else {
-							// default to group offset behaviour if the user-provided specific offsets
-							// do not contain a value for this partition
-							subscribedPartitionsToStartOffsets.put(seedPartition, KafkaTopicPartitionStateSentinel.GROUP_OFFSET);
-						}
+					Long specificOffset = specificStartupOffsets.get(seedPartition);
+					if (specificOffset != null) {
+						// since the specified offsets represent the next record to read, we subtract
+						// it by one so that the initial state of the consumer will be correct
+						subscribedPartitionsToStartOffsets.put(seedPartition, specificOffset - 1);
+					} else {
+						// default to group offset behaviour if the user-provided specific offsets
+						// do not contain a value for this partition
+						subscribedPartitionsToStartOffsets.put(seedPartition, KafkaTopicPartitionStateSentinel.GROUP_OFFSET);
 					}
-
-					break;
-				case TIMESTAMP:
-					if (startupOffsetsTimestamp == null) {
-						throw new IllegalStateException(
-							"Startup mode for the consumer set to " + StartupMode.TIMESTAMP +
-								", but no startup timestamp was specified.");
-					}
-
-					for (Map.Entry<KafkaTopicPartition, Long> partitionToOffset
-							: fetchOffsetsWithTimestamp(allPartitions, startupOffsetsTimestamp).entrySet()) {
-						subscribedPartitionsToStartOffsets.put(
-							partitionToOffset.getKey(),
-							(partitionToOffset.getValue() == null)
-									// if an offset cannot be retrieved for a partition with the given timestamp,
-									// we default to using the latest offset for the partition
-									? KafkaTopicPartitionStateSentinel.LATEST_OFFSET
-									// since the specified offsets represent the next record to read, we subtract
-									// it by one so that the initial state of the consumer will be correct
-									: partitionToOffset.getValue() - 1);
-					}
-
-					break;
-				default:
-					for (KafkaTopicPartition seedPartition : allPartitions) {
-						subscribedPartitionsToStartOffsets.put(seedPartition, startupMode.getStateSentinel());
-					}
+				}
 			}
 
 			if (!subscribedPartitionsToStartOffsets.isEmpty()) {
@@ -564,13 +481,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 						LOG.info("Consumer subtask {} will start reading the following {} partitions from the latest offsets: {}",
 							getRuntimeContext().getIndexOfThisSubtask(),
 							subscribedPartitionsToStartOffsets.size(),
-							subscribedPartitionsToStartOffsets.keySet());
-						break;
-					case TIMESTAMP:
-						LOG.info("Consumer subtask {} will start reading the following {} partitions from timestamp {}: {}",
-							getRuntimeContext().getIndexOfThisSubtask(),
-							subscribedPartitionsToStartOffsets.size(),
-							startupOffsetsTimestamp,
 							subscribedPartitionsToStartOffsets.keySet());
 						break;
 					case SPECIFIC_OFFSETS:
@@ -650,9 +560,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 				periodicWatermarkAssigner,
 				punctuatedWatermarkAssigner,
 				(StreamingRuntimeContext) getRuntimeContext(),
-				offsetCommitMode,
-				getRuntimeContext().getMetricGroup().addGroup(KAFKA_CONSUMER_METRICS_GROUP),
-				useMetrics);
+				offsetCommitMode);
 
 		if (!running) {
 			return;
@@ -679,7 +587,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 
 						while (running) {
 							if (LOG.isDebugEnabled()) {
-								LOG.debug("Consumer subtask {} is trying to discover new partitions ...", getRuntimeContext().getIndexOfThisSubtask());
+								LOG.debug("Consumer subtask {} is trying to discover new partitions ...");
 							}
 
 							try {
@@ -709,10 +617,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 						discoveryLoopErrorRef.set(e);
 					} finally {
 						// calling cancel will also let the fetcher loop escape
-						// (if not running, cancel() was already called)
-						if (running) {
-							cancel();
-						}
+						cancel();
 					}
 				}
 			});
@@ -934,9 +839,7 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 			SerializedValue<AssignerWithPeriodicWatermarks<T>> watermarksPeriodic,
 			SerializedValue<AssignerWithPunctuatedWatermarks<T>> watermarksPunctuated,
 			StreamingRuntimeContext runtimeContext,
-			OffsetCommitMode offsetCommitMode,
-			MetricGroup kafkaMetricGroup,
-			boolean useMetrics) throws Exception;
+			OffsetCommitMode offsetCommitMode) throws Exception;
 
 	/**
 	 * Creates the partition discoverer that is used to find new partitions for this subtask.
@@ -953,10 +856,6 @@ public abstract class FlinkKafkaConsumerBase<T> extends RichParallelSourceFuncti
 			int numParallelSubtasks);
 
 	protected abstract boolean getIsAutoCommitEnabled();
-
-	protected abstract Map<KafkaTopicPartition, Long> fetchOffsetsWithTimestamp(
-			Collection<KafkaTopicPartition> partitions,
-			long timestamp);
 
 	// ------------------------------------------------------------------------
 	//  ResultTypeQueryable methods

@@ -23,8 +23,7 @@ package org.apache.flink.test.checkpointing;
  */
 public class AsyncFileBackendEventTimeWindowCheckpointingITCase extends AbstractEventTimeWindowCheckpointingITCase {
 
-	@Override
-	protected StateBackendEnum getStateBackend() {
-		return StateBackendEnum.FILE_ASYNC;
+	public AsyncFileBackendEventTimeWindowCheckpointingITCase() {
+		super(StateBackendEnum.FILE_ASYNC);
 	}
 }

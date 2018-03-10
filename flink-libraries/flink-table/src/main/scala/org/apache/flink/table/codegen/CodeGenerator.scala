@@ -581,7 +581,39 @@ abstract class CodeGenerator(
   override def visitFieldAccess(rexFieldAccess: RexFieldAccess): GeneratedExpression = {
     val refExpr = rexFieldAccess.getReferenceExpr.accept(this)
     val index = rexFieldAccess.getField.getIndex
-    generateFieldAccess(refExpr, index)
+    val fieldAccessExpr = generateFieldAccess(
+      refExpr.resultType,
+      refExpr.resultTerm,
+      index)
+
+    val resultTerm = newName("result")
+    val nullTerm = newName("isNull")
+    val resultTypeTerm = primitiveTypeTermForTypeInfo(fieldAccessExpr.resultType)
+    val defaultValue = primitiveDefaultValue(fieldAccessExpr.resultType)
+    val resultCode = if (nullCheck) {
+      s"""
+        |${refExpr.code}
+        |$resultTypeTerm $resultTerm;
+        |boolean $nullTerm;
+        |if (${refExpr.nullTerm}) {
+        |  $resultTerm = $defaultValue;
+        |  $nullTerm = true;
+        |}
+        |else {
+        |  ${fieldAccessExpr.code}
+        |  $resultTerm = ${fieldAccessExpr.resultTerm};
+        |  $nullTerm = ${fieldAccessExpr.nullTerm};
+        |}
+        |""".stripMargin
+    } else {
+      s"""
+        |${refExpr.code}
+        |${fieldAccessExpr.code}
+        |$resultTypeTerm $resultTerm = ${fieldAccessExpr.resultTerm};
+        |""".stripMargin
+    }
+
+    GeneratedExpression(resultTerm, nullTerm, resultCode, fieldAccessExpr.resultType)
   }
 
   override def visitLiteral(literal: RexLiteral): GeneratedExpression = {
@@ -742,56 +774,56 @@ abstract class CodeGenerator(
         val right = operands(1)
         requireNumeric(left)
         requireNumeric(right)
-        generateArithmeticOperator("+", nullCheck, resultType, left, right, config)
+        generateArithmeticOperator("+", nullCheck, resultType, left, right)
 
       case PLUS | DATETIME_PLUS if isTemporal(resultType) =>
         val left = operands.head
         val right = operands(1)
         requireTemporal(left)
         requireTemporal(right)
-        generateTemporalPlusMinus(plus = true, nullCheck, left, right, config)
+        generateTemporalPlusMinus(plus = true, nullCheck, left, right)
 
       case MINUS if isNumeric(resultType) =>
         val left = operands.head
         val right = operands(1)
         requireNumeric(left)
         requireNumeric(right)
-        generateArithmeticOperator("-", nullCheck, resultType, left, right, config)
+        generateArithmeticOperator("-", nullCheck, resultType, left, right)
 
       case MINUS | MINUS_DATE if isTemporal(resultType) =>
         val left = operands.head
         val right = operands(1)
         requireTemporal(left)
         requireTemporal(right)
-        generateTemporalPlusMinus(plus = false, nullCheck, left, right, config)
+        generateTemporalPlusMinus(plus = false, nullCheck, left, right)
 
       case MULTIPLY if isNumeric(resultType) =>
         val left = operands.head
         val right = operands(1)
         requireNumeric(left)
         requireNumeric(right)
-        generateArithmeticOperator("*", nullCheck, resultType, left, right, config)
+        generateArithmeticOperator("*", nullCheck, resultType, left, right)
 
       case MULTIPLY if isTimeInterval(resultType) =>
         val left = operands.head
         val right = operands(1)
         requireTimeInterval(left)
         requireNumeric(right)
-        generateArithmeticOperator("*", nullCheck, resultType, left, right, config)
+        generateArithmeticOperator("*", nullCheck, resultType, left, right)
 
       case DIVIDE | DIVIDE_INTEGER if isNumeric(resultType) =>
         val left = operands.head
         val right = operands(1)
         requireNumeric(left)
         requireNumeric(right)
-        generateArithmeticOperator("/", nullCheck, resultType, left, right, config)
+        generateArithmeticOperator("/", nullCheck, resultType, left, right)
 
       case MOD if isNumeric(resultType) =>
         val left = operands.head
         val right = operands(1)
         requireNumeric(left)
         requireNumeric(right)
-        generateArithmeticOperator("%", nullCheck, resultType, left, right, config)
+        generateArithmeticOperator("%", nullCheck, resultType, left, right)
 
       case UNARY_MINUS if isNumeric(resultType) =>
         val operand = operands.head
@@ -922,7 +954,7 @@ abstract class CodeGenerator(
         val left = operands.head
         val right = operands(1)
         requireString(left)
-        generateArithmeticOperator("+", nullCheck, resultType, left, right, config)
+        generateArithmeticOperator("+", nullCheck, resultType, left, right)
 
       // rows
       case ROW =>
@@ -969,21 +1001,6 @@ abstract class CodeGenerator(
         requireArray(array)
         generateArrayElement(this, array)
 
-      case DOT =>
-        // Due to https://issues.apache.org/jira/browse/CALCITE-2162, expression such as
-        // "array[1].a.b" won't work now.
-        if (operands.size > 2) {
-          throw new CodeGenException(
-            "A DOT operator with more than 2 operands is not supported yet.")
-        }
-        val fieldName = call.operands.get(1).asInstanceOf[RexLiteral].getValueAs(classOf[String])
-        val fieldIdx = operands
-          .head
-          .resultType
-          .asInstanceOf[CompositeType[_]]
-          .getFieldIndex(fieldName)
-        generateFieldAccess(operands.head, fieldIdx)
-
       case ScalarSqlFunctions.CONCAT =>
         generateConcat(this.nullCheck, operands)
 
@@ -1023,43 +1040,6 @@ abstract class CodeGenerator(
   // ----------------------------------------------------------------------------------------------
   // generator helping methods
   // ----------------------------------------------------------------------------------------------
-
-  private def generateFieldAccess(refExpr: GeneratedExpression, index: Int): GeneratedExpression = {
-
-    val fieldAccessExpr = generateFieldAccess(
-      refExpr.resultType,
-      refExpr.resultTerm,
-      index)
-
-    val resultTerm = newName("result")
-    val nullTerm = newName("isNull")
-    val resultTypeTerm = primitiveTypeTermForTypeInfo(fieldAccessExpr.resultType)
-    val defaultValue = primitiveDefaultValue(fieldAccessExpr.resultType)
-    val resultCode = if (nullCheck) {
-      s"""
-        |${refExpr.code}
-        |$resultTypeTerm $resultTerm;
-        |boolean $nullTerm;
-        |if (${refExpr.nullTerm}) {
-        |  $resultTerm = $defaultValue;
-        |  $nullTerm = true;
-        |}
-        |else {
-        |  ${fieldAccessExpr.code}
-        |  $resultTerm = ${fieldAccessExpr.resultTerm};
-        |  $nullTerm = ${fieldAccessExpr.nullTerm};
-        |}
-        |""".stripMargin
-    } else {
-      s"""
-        |${refExpr.code}
-        |${fieldAccessExpr.code}
-        |$resultTypeTerm $resultTerm = ${fieldAccessExpr.resultTerm};
-        |""".stripMargin
-    }
-
-    GeneratedExpression(resultTerm, nullTerm, resultCode, fieldAccessExpr.resultType)
-  }
 
   private def generateInputAccess(
       inputType: TypeInformation[_ <: Any],

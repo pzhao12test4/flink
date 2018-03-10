@@ -20,7 +20,7 @@ package org.apache.flink.runtime.state;
 
 import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
-import org.apache.flink.runtime.checkpoint.PrioritizedOperatorSubtaskState;
+import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 
@@ -44,29 +44,19 @@ public interface TaskStateManager extends CheckpointListener {
 	 * Report the state snapshots for the operator instances running in the owning task.
 	 *
 	 * @param checkpointMetaData meta data from the checkpoint request.
-	 * @param checkpointMetrics  task level metrics for the checkpoint.
-	 * @param acknowledgedState  the reported states to acknowledge to the job manager.
-	 * @param localState         the reported states for local recovery.
+	 * @param checkpointMetrics task level metrics for the checkpoint.
+	 * @param acknowledgedState the reported states from the owning task.
 	 */
-	void reportTaskStateSnapshots(
+	void reportStateHandles(
 		@Nonnull CheckpointMetaData checkpointMetaData,
 		@Nonnull CheckpointMetrics checkpointMetrics,
-		@Nullable TaskStateSnapshot acknowledgedState,
-		@Nullable TaskStateSnapshot localState);
+		@Nullable TaskStateSnapshot acknowledgedState);
 
 	/**
 	 * Returns means to restore previously reported state of an operator running in the owning task.
 	 *
 	 * @param operatorID the id of the operator for which we request state.
-	 * @return Previous state for the operator. The previous state can be empty if the operator had no previous state.
+	 * @return previous state for the operator. Null if no previous state exists.
 	 */
-	@Nonnull
-	PrioritizedOperatorSubtaskState prioritizedOperatorState(OperatorID operatorID);
-
-	/**
-	 * Returns the configuration for local recovery, i.e. the base directories for all file-based local state of the
-	 * owning subtask and the general mode for local recovery.
-	 */
-	@Nonnull
-	LocalRecoveryConfig createLocalRecoveryConfig();
+	OperatorSubtaskState operatorStates(OperatorID operatorID);
 }

@@ -24,9 +24,6 @@ import org.apache.flink.runtime.state.SharedStateRegistry;
 import org.apache.flink.runtime.state.StateUtil;
 import org.apache.flink.util.Preconditions;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -70,7 +67,6 @@ public class TaskStateSnapshot implements CompositeStateHandle {
 	/**
 	 * Returns the subtask state for the given operator id (or null if not contained).
 	 */
-	@Nullable
 	public OperatorSubtaskState getSubtaskStateByOperatorID(OperatorID operatorID) {
 		return subtaskStatesByOperatorID.get(operatorID);
 	}
@@ -79,10 +75,7 @@ public class TaskStateSnapshot implements CompositeStateHandle {
 	 * Maps the given operator id to the given subtask state. Returns the subtask state of a previous mapping, if such
 	 * a mapping existed or null otherwise.
 	 */
-	public OperatorSubtaskState putSubtaskStateByOperatorID(
-		@Nonnull OperatorID operatorID,
-		@Nonnull OperatorSubtaskState state) {
-
+	public OperatorSubtaskState putSubtaskStateByOperatorID(OperatorID operatorID, OperatorSubtaskState state) {
 		return subtaskStatesByOperatorID.put(operatorID, Preconditions.checkNotNull(state));
 	}
 
@@ -91,18 +84,6 @@ public class TaskStateSnapshot implements CompositeStateHandle {
 	 */
 	public Set<Map.Entry<OperatorID, OperatorSubtaskState>> getSubtaskStateMappings() {
 		return subtaskStatesByOperatorID.entrySet();
-	}
-
-	/**
-	 * Returns true if at least one {@link OperatorSubtaskState} in subtaskStatesByOperatorID has state.
-	 */
-	public boolean hasState() {
-		for (OperatorSubtaskState operatorSubtaskState : subtaskStatesByOperatorID.values()) {
-			if (operatorSubtaskState != null && operatorSubtaskState.hasState()) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	@Override

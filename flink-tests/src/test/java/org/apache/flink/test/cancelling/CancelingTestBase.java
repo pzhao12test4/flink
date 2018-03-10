@@ -22,7 +22,6 @@ import org.apache.flink.api.common.Plan;
 import org.apache.flink.configuration.AkkaOptions;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.optimizer.DataStatistics;
 import org.apache.flink.optimizer.Optimizer;
@@ -88,7 +87,7 @@ public abstract class CancelingTestBase extends TestLogger {
 	public void startCluster() throws Exception {
 		verifyJvmOptions();
 		Configuration config = new Configuration();
-		config.setBoolean(CoreOptions.FILESYTEM_DEFAULT_OVERRIDE, true);
+		config.setBoolean(ConfigConstants.FILESYSTEM_DEFAULT_OVERWRITE_KEY, true);
 		config.setInteger(ConfigConstants.LOCAL_NUMBER_TASK_MANAGER, 2);
 		config.setInteger(ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, 4);
 		config.setString(AkkaOptions.ASK_TIMEOUT, TestingUtils.DEFAULT_AKKA_ASK_TIMEOUT());

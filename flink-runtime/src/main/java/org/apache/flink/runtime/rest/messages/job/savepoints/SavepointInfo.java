@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.rest.messages.job.savepoints;
 
-import org.apache.flink.runtime.rest.messages.ResponseBody;
 import org.apache.flink.runtime.rest.messages.json.SerializedThrowableDeserializer;
 import org.apache.flink.runtime.rest.messages.json.SerializedThrowableSerializer;
 import org.apache.flink.util.SerializedThrowable;
@@ -31,17 +30,23 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.annotatio
 
 import javax.annotation.Nullable;
 
+import static java.util.Objects.requireNonNull;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 /**
  * Represents information about a finished savepoint.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class SavepointInfo implements ResponseBody {
+public class SavepointInfo {
+
+	private static final String FIELD_NAME_REQUEST_ID = "request-id";
 
 	private static final String FIELD_NAME_LOCATION = "location";
 
 	private static final String FIELD_NAME_FAILURE_CAUSE = "failure-cause";
+
+	@JsonProperty(FIELD_NAME_REQUEST_ID)
+	private final SavepointTriggerId requestId;
 
 	@JsonProperty(FIELD_NAME_LOCATION)
 	@Nullable
@@ -55,6 +60,7 @@ public class SavepointInfo implements ResponseBody {
 
 	@JsonCreator
 	public SavepointInfo(
+			@JsonProperty(FIELD_NAME_REQUEST_ID) final SavepointTriggerId requestId,
 			@JsonProperty(FIELD_NAME_LOCATION) @Nullable final String location,
 			@JsonProperty(FIELD_NAME_FAILURE_CAUSE)
 			@JsonDeserialize(using = SerializedThrowableDeserializer.class)
@@ -63,8 +69,13 @@ public class SavepointInfo implements ResponseBody {
 			location != null ^ failureCause != null,
 			"Either location or failureCause must be set");
 
+		this.requestId = requireNonNull(requestId);
 		this.location = location;
 		this.failureCause = failureCause;
+	}
+
+	public SavepointTriggerId getRequestId() {
+		return requestId;
 	}
 
 	@Nullable
@@ -76,4 +87,5 @@ public class SavepointInfo implements ResponseBody {
 	public SerializedThrowable getFailureCause() {
 		return failureCause;
 	}
+
 }

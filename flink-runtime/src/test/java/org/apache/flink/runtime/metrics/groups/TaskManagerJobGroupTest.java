@@ -27,8 +27,6 @@ import org.apache.flink.runtime.metrics.dump.QueryScopeInfo;
 import org.apache.flink.runtime.metrics.util.DummyCharacterFilter;
 import org.apache.flink.util.TestLogger;
 
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -39,22 +37,10 @@ import static org.junit.Assert.assertEquals;
  */
 public class TaskManagerJobGroupTest extends TestLogger {
 
-	private MetricRegistryImpl registry;
-
-	@Before
-	public void setup() {
-		registry = new MetricRegistryImpl(MetricRegistryConfiguration.defaultMetricRegistryConfiguration());
-	}
-
-	@After
-	public void teardown() throws Exception {
-		if (registry != null) {
-			registry.shutdown().get();
-		}
-	}
-
 	@Test
 	public void testGenerateScopeDefault() {
+		MetricRegistryImpl registry = new MetricRegistryImpl(MetricRegistryConfiguration.defaultMetricRegistryConfiguration());
+
 		TaskManagerMetricGroup tmGroup = new TaskManagerMetricGroup(registry, "theHostName", "test-tm-id");
 		JobMetricGroup jmGroup = new TaskManagerJobMetricGroup(registry, tmGroup, new JobID(), "myJobName");
 
@@ -65,10 +51,11 @@ public class TaskManagerJobGroupTest extends TestLogger {
 		assertEquals(
 				"theHostName.taskmanager.test-tm-id.myJobName.name",
 				jmGroup.getMetricIdentifier("name"));
+		registry.shutdown();
 	}
 
 	@Test
-	public void testGenerateScopeCustom() throws Exception {
+	public void testGenerateScopeCustom() {
 		Configuration cfg = new Configuration();
 		cfg.setString(MetricOptions.SCOPE_NAMING_TM, "abc");
 		cfg.setString(MetricOptions.SCOPE_NAMING_TM_JOB, "some-constant.<job_name>");
@@ -86,11 +73,11 @@ public class TaskManagerJobGroupTest extends TestLogger {
 		assertEquals(
 				"some-constant.myJobName.name",
 				jmGroup.getMetricIdentifier("name"));
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	@Test
-	public void testGenerateScopeCustomWildcard() throws Exception {
+	public void testGenerateScopeCustomWildcard() {
 		Configuration cfg = new Configuration();
 		cfg.setString(MetricOptions.SCOPE_NAMING_TM, "peter.<tm_id>");
 		cfg.setString(MetricOptions.SCOPE_NAMING_TM_JOB, "*.some-constant.<job_id>");
@@ -108,12 +95,13 @@ public class TaskManagerJobGroupTest extends TestLogger {
 		assertEquals(
 				"peter.test-tm-id.some-constant." + jid + ".name",
 				jmGroup.getMetricIdentifier("name"));
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	@Test
 	public void testCreateQueryServiceMetricInfo() {
 		JobID jid = new JobID();
+		MetricRegistryImpl registry = new MetricRegistryImpl(MetricRegistryConfiguration.defaultMetricRegistryConfiguration());
 		TaskManagerMetricGroup tm = new TaskManagerMetricGroup(registry, "host", "id");
 		TaskManagerJobMetricGroup job = new TaskManagerJobMetricGroup(registry, tm, jid, "jobname");
 

@@ -91,7 +91,7 @@ public class SchedulerTestUtils {
 		when(vertex.toString()).thenReturn("TEST-VERTEX");
 		when(vertex.getJobVertex()).thenReturn(executionJobVertex);
 		when(vertex.getJobvertexId()).thenReturn(new JobVertexID());
-
+		
 		Execution execution = mock(Execution.class);
 		when(execution.getVertex()).thenReturn(vertex);
 		
@@ -126,7 +126,6 @@ public class SchedulerTestUtils {
 		ExecutionVertex vertex = mock(ExecutionVertex.class);
 
 		when(vertex.getPreferredLocationsBasedOnInputs()).thenReturn(preferredLocationFutures);
-		when(vertex.getPreferredLocations()).thenReturn(preferredLocationFutures);
 		when(vertex.getJobId()).thenReturn(new JobID());
 		when(vertex.toString()).thenReturn("TEST-VERTEX");
 		when(vertex.getJobVertex()).thenReturn(executionJobVertex);
@@ -153,7 +152,7 @@ public class SchedulerTestUtils {
 		when(vertex.toString()).thenReturn("TEST-VERTEX");
 		when(vertex.getTaskNameWithSubtaskIndex()).thenReturn("TEST-VERTEX");
 		when(vertex.getJobVertex()).thenReturn(executionJobVertex);
-
+		
 		Execution execution = mock(Execution.class);
 		when(execution.getVertex()).thenReturn(vertex);
 		

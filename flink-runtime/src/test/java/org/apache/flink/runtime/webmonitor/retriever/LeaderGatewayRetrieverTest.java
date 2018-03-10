@@ -20,7 +20,7 @@ package org.apache.flink.runtime.webmonitor.retriever;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.concurrent.FutureUtils;
-import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.leaderelection.TestingLeaderRetrievalService;
 import org.apache.flink.runtime.rpc.RpcGateway;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.TestLogger;
@@ -52,14 +52,14 @@ public class LeaderGatewayRetrieverTest extends TestLogger {
 		RpcGateway rpcGateway = mock(RpcGateway.class);
 
 		TestingLeaderGatewayRetriever leaderGatewayRetriever = new TestingLeaderGatewayRetriever(rpcGateway);
-		SettableLeaderRetrievalService settableLeaderRetrievalService = new SettableLeaderRetrievalService();
+		TestingLeaderRetrievalService testingLeaderRetrievalService = new TestingLeaderRetrievalService();
 
-		settableLeaderRetrievalService.start(leaderGatewayRetriever);
+		testingLeaderRetrievalService.start(leaderGatewayRetriever);
 
 		CompletableFuture<RpcGateway> gatewayFuture = leaderGatewayRetriever.getFuture();
 
 		// this triggers the first gateway retrieval attempt
-		settableLeaderRetrievalService.notifyListener(address, leaderId);
+		testingLeaderRetrievalService.notifyListener(address, leaderId);
 
 		// check that the first future has been failed
 		try {

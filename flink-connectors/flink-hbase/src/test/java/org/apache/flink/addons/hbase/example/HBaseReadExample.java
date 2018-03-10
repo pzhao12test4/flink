@@ -86,6 +86,9 @@ public class HBaseReadExample {
 
 		hbaseDs.print();
 
+		// kick off execution.
+		env.execute();
+
 	}
 
 }

@@ -111,8 +111,7 @@ public class ClientTest {
 	@After
 	public void tearDown() throws Exception {
 		if (nioGroup != null) {
-			// note: no "quiet period" to not trigger Netty#4357
-			nioGroup.shutdownGracefully(0, 10, TimeUnit.SECONDS);
+			nioGroup.shutdownGracefully();
 		}
 	}
 

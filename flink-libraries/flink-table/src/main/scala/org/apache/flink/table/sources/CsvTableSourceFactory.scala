@@ -21,12 +21,11 @@ package org.apache.flink.table.sources
 import java.util
 
 import org.apache.flink.table.api.TableException
-import org.apache.flink.table.descriptors.ConnectorDescriptorValidator.{CONNECTOR_PROPERTY_VERSION, CONNECTOR_TYPE}
+import org.apache.flink.table.descriptors.ConnectorDescriptorValidator.{CONNECTOR_TYPE, CONNECTOR_VERSION}
 import org.apache.flink.table.descriptors.CsvValidator._
-import org.apache.flink.table.descriptors.DescriptorProperties.toScala
 import org.apache.flink.table.descriptors.FileSystemValidator.{CONNECTOR_PATH, CONNECTOR_TYPE_VALUE}
-import org.apache.flink.table.descriptors.FormatDescriptorValidator.{FORMAT_PROPERTY_VERSION, FORMAT_TYPE}
-import org.apache.flink.table.descriptors.SchemaValidator.SCHEMA
+import org.apache.flink.table.descriptors.FormatDescriptorValidator.{FORMAT_TYPE, FORMAT_VERSION}
+import org.apache.flink.table.descriptors.SchemaValidator.{SCHEMA, SCHEMA_VERSION}
 import org.apache.flink.table.descriptors._
 import org.apache.flink.types.Row
 
@@ -39,8 +38,9 @@ class CsvTableSourceFactory extends TableSourceFactory[Row] {
     val context = new util.HashMap[String, String]()
     context.put(CONNECTOR_TYPE, CONNECTOR_TYPE_VALUE)
     context.put(FORMAT_TYPE, FORMAT_TYPE_VALUE)
-    context.put(CONNECTOR_PROPERTY_VERSION, "1")
-    context.put(FORMAT_PROPERTY_VERSION, "1")
+    context.put(CONNECTOR_VERSION, "1")
+    context.put(FORMAT_VERSION, "1")
+    context.put(SCHEMA_VERSION, "1")
     context
   }
 
@@ -76,36 +76,33 @@ class CsvTableSourceFactory extends TableSourceFactory[Row] {
     // build
     val csvTableSourceBuilder = new CsvTableSource.Builder
 
-    val formatSchema = params.getTableSchema(FORMAT_FIELDS)
-    val tableSchema = params.getTableSchema(SCHEMA)
+    val tableSchema = params.getTableSchema(SCHEMA).get
+    val encodingSchema = params.getTableSchema(FORMAT_FIELDS)
 
     // the CsvTableSource needs some rework first
     // for now the schema must be equal to the encoding
-    if (!formatSchema.equals(tableSchema)) {
+    if (!encodingSchema.contains(tableSchema)) {
       throw new TableException(
         "Encodings that differ from the schema are not supported yet for CsvTableSources.")
     }
 
-    toScala(params.getOptionalString(CONNECTOR_PATH))
-      .foreach(csvTableSourceBuilder.path)
-    toScala(params.getOptionalString(FORMAT_FIELD_DELIMITER))
-      .foreach(csvTableSourceBuilder.fieldDelimiter)
-    toScala(params.getOptionalString(FORMAT_LINE_DELIMITER))
-      .foreach(csvTableSourceBuilder.lineDelimiter)
+    params.getString(CONNECTOR_PATH).foreach(csvTableSourceBuilder.path)
+    params.getString(FORMAT_FIELD_DELIMITER).foreach(csvTableSourceBuilder.fieldDelimiter)
+    params.getString(FORMAT_LINE_DELIMITER).foreach(csvTableSourceBuilder.lineDelimiter)
 
-    formatSchema.getColumnNames.zip(formatSchema.getTypes).foreach { case (name, tpe) =>
-      csvTableSourceBuilder.field(name, tpe)
+    encodingSchema.foreach { schema =>
+      schema.getColumnNames.zip(schema.getTypes).foreach { case (name, tpe) =>
+        csvTableSourceBuilder.field(name, tpe)
+      }
     }
-    toScala(params.getOptionalCharacter(FORMAT_QUOTE_CHARACTER))
-      .foreach(csvTableSourceBuilder.quoteCharacter)
-    toScala(params.getOptionalString(FORMAT_COMMENT_PREFIX))
-      .foreach(csvTableSourceBuilder.commentPrefix)
-    toScala(params.getOptionalBoolean(FORMAT_IGNORE_FIRST_LINE)).foreach { flag =>
+    params.getCharacter(FORMAT_QUOTE_CHARACTER).foreach(csvTableSourceBuilder.quoteCharacter)
+    params.getString(FORMAT_COMMENT_PREFIX).foreach(csvTableSourceBuilder.commentPrefix)
+    params.getBoolean(FORMAT_IGNORE_FIRST_LINE).foreach { flag =>
       if (flag) {
         csvTableSourceBuilder.ignoreFirstLine()
       }
     }
-    toScala(params.getOptionalBoolean(FORMAT_IGNORE_PARSE_ERRORS)).foreach { flag =>
+    params.getBoolean(FORMAT_IGNORE_PARSE_ERRORS).foreach { flag =>
       if (flag) {
         csvTableSourceBuilder.ignoreParseErrors()
       }

@@ -18,35 +18,31 @@
 
 package org.apache.flink.runtime.jobmanager.slots;
 
-import org.apache.flink.runtime.jobmanager.scheduler.Locality;
 import org.apache.flink.runtime.jobmaster.slotpool.AllocatedSlot;
+import org.apache.flink.runtime.jobmanager.scheduler.Locality;
 
-import javax.annotation.Nonnull;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * A combination of a {@link AllocatedSlot} and a {@link Locality}.
  */
 public class SlotAndLocality {
 
-	@Nonnull
 	private final AllocatedSlot slot;
 
-	@Nonnull
 	private final Locality locality;
 
-	public SlotAndLocality(@Nonnull AllocatedSlot slot, @Nonnull Locality locality) {
-		this.slot = slot;
-		this.locality = locality;
+	public SlotAndLocality(AllocatedSlot slot, Locality locality) {
+		this.slot = checkNotNull(slot);
+		this.locality = checkNotNull(locality);
 	}
 
 	// ------------------------------------------------------------------------
 
-	@Nonnull
 	public AllocatedSlot getSlot() {
 		return slot;
 	}
 
-	@Nonnull
 	public Locality getLocality() {
 		return locality;
 	}

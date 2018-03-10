@@ -47,7 +47,6 @@ import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameter
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.concurrent.FutureUtils;
-import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.metrics.MetricRegistry;
@@ -150,7 +149,6 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 			SlotManager slotManager,
 			MetricRegistry metricRegistry,
 			JobLeaderIdService jobLeaderIdService,
-			ClusterInformation clusterInformation,
 			FatalErrorHandler fatalErrorHandler,
 			// Mesos specifics
 			Configuration flinkConfig,
@@ -168,7 +166,6 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 			slotManager,
 			metricRegistry,
 			jobLeaderIdService,
-			clusterInformation,
 			fatalErrorHandler);
 
 		this.mesosServices = Preconditions.checkNotNull(mesosServices);
@@ -333,7 +330,8 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 	}
 
 	@Override
-	public CompletableFuture<Void> postStop() {
+	public void postStop() throws Exception {
+		Exception exception = null;
 		FiniteDuration stopTimeout = new FiniteDuration(5L, TimeUnit.SECONDS);
 
 		CompletableFuture<Boolean> stopTaskMonitorFuture = stopActor(taskMonitor, stopTimeout);
@@ -354,11 +352,22 @@ public class MesosResourceManager extends ResourceManager<RegisteredMesosWorkerN
 			stopLaunchCoordinatorFuture,
 			stopReconciliationCoordinatorFuture);
 
-		final CompletableFuture<Void> terminationFuture = super.postStop();
+		// wait for the future to complete or to time out
+		try {
+			stopFuture.get();
+		} catch (Exception e) {
+			exception = e;
+		}
 
-		return stopFuture.thenCombine(
-			terminationFuture,
-			(Void voidA, Void voidB) -> null);
+		try {
+			super.postStop();
+		} catch (Exception e) {
+			exception = ExceptionUtils.firstOrSuppressed(e, exception);
+		}
+
+		if (exception != null) {
+			throw new ResourceManagerException("Could not properly shut down the ResourceManager.", exception);
+		}
 	}
 
 	@Override

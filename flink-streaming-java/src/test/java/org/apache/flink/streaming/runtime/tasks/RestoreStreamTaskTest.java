@@ -252,7 +252,7 @@ public class RestoreStreamTaskTest extends TestLogger {
 
 		JobManagerTaskRestore jobManagerTaskRestore = new JobManagerTaskRestore(
 			taskStateManager.getReportedCheckpointId(),
-			taskStateManager.getLastJobManagerTaskStateSnapshot());
+			taskStateManager.getLastTaskStateSnapshot());
 
 		testHarness.endInput();
 		testHarness.waitForTaskCompletion();
@@ -268,7 +268,7 @@ public class RestoreStreamTaskTest extends TestLogger {
 
 		testHarness.taskStateManager.setWaitForReportLatch(new OneShotLatch());
 
-		while (!streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpointWithDefaultLocation())) {}
+		while (!streamTask.triggerCheckpoint(checkpointMetaData, CheckpointOptions.forCheckpoint())) {}
 
 		testHarness.taskStateManager.getWaitForReportLatch().await();
 		long reportedCheckpointId = testHarness.taskStateManager.getReportedCheckpointId();

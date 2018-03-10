@@ -138,8 +138,7 @@ public class CliFrontendSavepointTest extends TestLogger {
 		try {
 			CliFrontend frontend = new MockedCliFrontend(new StandaloneClusterClient(
 				new Configuration(),
-				new TestingHighAvailabilityServices(),
-				false));
+				new TestingHighAvailabilityServices()));
 
 			String[] parameters = { "invalid job id" };
 			try {
@@ -289,7 +288,7 @@ public class CliFrontendSavepointTest extends TestLogger {
 		private final BiFunction<String, Time, CompletableFuture<Acknowledge>> disposeSavepointFunction;
 
 		DisposeSavepointClusterClient(BiFunction<String, Time, CompletableFuture<Acknowledge>> disposeSavepointFunction) throws Exception {
-			super(new Configuration(), new TestingHighAvailabilityServices(), false);
+			super(new Configuration(), new TestingHighAvailabilityServices());
 
 			this.disposeSavepointFunction = Preconditions.checkNotNull(disposeSavepointFunction);
 		}

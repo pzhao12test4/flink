@@ -23,20 +23,13 @@ import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
 import org.apache.flink.runtime.checkpoint.JobManagerTaskRestore;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
-import org.apache.flink.runtime.checkpoint.PrioritizedOperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
 import org.apache.flink.runtime.jobgraph.OperatorID;
 import org.apache.flink.runtime.taskmanager.CheckpointResponder;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
-
-import java.util.Collections;
-import java.util.List;
 
 /**
  * This class is the default implementation of {@link TaskStateManager} and collaborates with the job manager
@@ -44,13 +37,12 @@ import java.util.List;
  * not have to deal with the differences between remote or local state on recovery because this class handles both
  * cases transparently.
  *
- * <p>Reported state is tagged by clients so that this class can properly forward to the right receiver for the
+ * Reported state is tagged by clients so that this class can properly forward to the right receiver for the
  * checkpointed state.
+ *
+ * TODO: all interaction with local state store must still be implemented! It is currently just a placeholder.
  */
 public class TaskStateManagerImpl implements TaskStateManager {
-
-	/** The logger for this class. */
-	private static final Logger LOG = LoggerFactory.getLogger(TaskStateManagerImpl.class);
 
 	/** The id of the job for which this manager was created, can report, and recover. */
 	private final JobID jobId;
@@ -83,77 +75,35 @@ public class TaskStateManagerImpl implements TaskStateManager {
 	}
 
 	@Override
-	public void reportTaskStateSnapshots(
+	public void reportStateHandles(
 		@Nonnull CheckpointMetaData checkpointMetaData,
 		@Nonnull CheckpointMetrics checkpointMetrics,
-		@Nullable TaskStateSnapshot acknowledgedState,
-		@Nullable TaskStateSnapshot localState) {
-
-		long checkpointId = checkpointMetaData.getCheckpointId();
-
-		localStateStore.storeLocalState(checkpointId, localState);
+		@Nullable TaskStateSnapshot acknowledgedState) {
 
 		checkpointResponder.acknowledgeCheckpoint(
 			jobId,
 			executionAttemptID,
-			checkpointId,
+			checkpointMetaData.getCheckpointId(),
 			checkpointMetrics,
 			acknowledgedState);
 	}
 
-	@Nonnull
 	@Override
-	public PrioritizedOperatorSubtaskState prioritizedOperatorState(OperatorID operatorID) {
+	public OperatorSubtaskState operatorStates(OperatorID operatorID) {
 
 		if (jobManagerTaskRestore == null) {
-			return PrioritizedOperatorSubtaskState.emptyNotRestored();
+			return null;
 		}
 
-		TaskStateSnapshot jobManagerStateSnapshot =
-			jobManagerTaskRestore.getTaskStateSnapshot();
+		TaskStateSnapshot taskStateSnapshot = jobManagerTaskRestore.getTaskStateSnapshot();
+		return taskStateSnapshot.getSubtaskStateByOperatorID(operatorID);
 
-		OperatorSubtaskState jobManagerSubtaskState =
-			jobManagerStateSnapshot.getSubtaskStateByOperatorID(operatorID);
-
-		if (jobManagerSubtaskState == null) {
-			return PrioritizedOperatorSubtaskState.emptyNotRestored();
-		}
-
-		long restoreCheckpointId = jobManagerTaskRestore.getRestoreCheckpointId();
-
-		TaskStateSnapshot localStateSnapshot =
-			localStateStore.retrieveLocalState(restoreCheckpointId);
-
-		localStateStore.pruneMatchingCheckpoints((long checkpointId) -> checkpointId != restoreCheckpointId);
-
-		List<OperatorSubtaskState> alternativesByPriority = Collections.emptyList();
-
-		if (localStateSnapshot != null) {
-			OperatorSubtaskState localSubtaskState = localStateSnapshot.getSubtaskStateByOperatorID(operatorID);
-
-			if (localSubtaskState != null) {
-				alternativesByPriority = Collections.singletonList(localSubtaskState);
-			}
-		}
-
-		if (LOG.isTraceEnabled()) {
-			LOG.trace("Operator {} has remote state {} from job manager and local state alternatives {} from local " +
-					"state store {}.",
-				operatorID, jobManagerSubtaskState, alternativesByPriority, localStateStore);
-		}
-
-		PrioritizedOperatorSubtaskState.Builder builder = new PrioritizedOperatorSubtaskState.Builder(
-			jobManagerSubtaskState,
-			alternativesByPriority,
-			true);
-
-		return builder.build();
-	}
-
-	@Nonnull
-	@Override
-	public LocalRecoveryConfig createLocalRecoveryConfig() {
-		return localStateStore.getLocalRecoveryConfig();
+		/*
+		TODO!!!!!!!
+		1) lookup local states for a matching operatorID / checkpointID.
+		2) if nothing available: look into job manager provided state.
+		3) massage it into a snapshots and return stuff.
+		 */
 	}
 
 	/**
@@ -161,6 +111,6 @@ public class TaskStateManagerImpl implements TaskStateManager {
 	 */
 	@Override
 	public void notifyCheckpointComplete(long checkpointId) throws Exception {
-		localStateStore.confirmCheckpoint(checkpointId);
+		//TODO activate and prune local state later
 	}
 }

@@ -33,17 +33,11 @@ if [[ $HIGH_AVAILABILITY == "zookeeper" ]]; then
     # HA Mode
     readMasters
 
-    if [ ${MASTERS_ALL_LOCALHOST} = true ] ; then
-        for master in ${MASTERS[@]}; do
-            "$FLINK_BIN_DIR"/jobmanager.sh stop "${FLIP6}"
-        done
-    else
-        for master in ${MASTERS[@]}; do
-            ssh -n $FLINK_SSH_OPTS $master -- "nohup /bin/bash -l \"${FLINK_BIN_DIR}/jobmanager.sh\" stop \"${FLIP6}\" &"
-        done
-    fi
+    for master in ${MASTERS[@]}; do
+        ssh -n $FLINK_SSH_OPTS $master -- "nohup /bin/bash -l \"${FLINK_BIN_DIR}/jobmanager.sh\" stop \"${FLIP6}\" &"
+    done
 
 else
-    "$FLINK_BIN_DIR"/jobmanager.sh stop "${FLIP6}"
+	  "$FLINK_BIN_DIR"/jobmanager.sh stop "${FLIP6}"
 fi
 shopt -u nocasematch

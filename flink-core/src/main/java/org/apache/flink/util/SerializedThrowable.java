@@ -25,6 +25,8 @@ import java.lang.ref.WeakReference;
 import java.util.HashSet;
 import java.util.Set;
 
+import static java.util.Objects.requireNonNull;
+
 /**
  * Utility class for dealing with user-defined Throwable types that are serialized (for
  * example during RPC/Actor communication), but cannot be resolved with the default
@@ -60,6 +62,18 @@ public class SerializedThrowable extends Exception implements Serializable {
 	 */
 	public SerializedThrowable(Throwable exception) {
 		this(exception, new HashSet<>());
+	}
+
+	/**
+	 * Creates a new SerializedThrowable from a serialized exception provided as a byte array.
+	 */
+	public SerializedThrowable(
+			final byte[] serializedException,
+			final String originalErrorClassName,
+			final String fullStringifiedStackTrace) {
+		this.serializedException = requireNonNull(serializedException);
+		this.originalErrorClassName = requireNonNull(originalErrorClassName);
+		this.fullStringifiedStackTrace = requireNonNull(fullStringifiedStackTrace);
 	}
 
 	private SerializedThrowable(Throwable exception, Set<Throwable> alreadySeen) {

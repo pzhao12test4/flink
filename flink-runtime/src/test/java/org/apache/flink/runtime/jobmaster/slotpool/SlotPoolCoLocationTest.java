@@ -20,7 +20,6 @@ package org.apache.flink.runtime.jobmaster.slotpool;
 
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
-import org.apache.flink.runtime.clusterframework.types.SlotProfile;
 import org.apache.flink.runtime.executiongraph.utils.SimpleAckingTaskManagerGateway;
 import org.apache.flink.runtime.instance.SlotSharingGroupId;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
@@ -32,10 +31,10 @@ import org.apache.flink.runtime.resourcemanager.SlotRequest;
 import org.apache.flink.runtime.taskexecutor.slot.SlotOffer;
 import org.apache.flink.runtime.taskmanager.LocalTaskManagerLocation;
 import org.apache.flink.runtime.taskmanager.TaskManagerLocation;
-import org.apache.flink.runtime.testingUtils.TestingUtils;
 
 import org.junit.Test;
 
+import java.util.Collections;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -79,8 +78,7 @@ public class SlotPoolCoLocationTest extends SlotPoolSchedulingTestBase {
 				slotSharingGroupId,
 				coLocationConstraint1),
 			true,
-			SlotProfile.noRequirements(),
-			TestingUtils.infiniteTime());
+			Collections.emptyList());
 
 		CompletableFuture<LogicalSlot> logicalSlotFuture22 = slotProvider.allocateSlot(
 			new ScheduledUnit(
@@ -88,8 +86,7 @@ public class SlotPoolCoLocationTest extends SlotPoolSchedulingTestBase {
 				slotSharingGroupId,
 				coLocationConstraint2),
 			true,
-			SlotProfile.noRequirements(),
-			TestingUtils.infiniteTime());
+			Collections.emptyList());
 
 		CompletableFuture<LogicalSlot> logicalSlotFuture12 = slotProvider.allocateSlot(
 			new ScheduledUnit(
@@ -97,8 +94,7 @@ public class SlotPoolCoLocationTest extends SlotPoolSchedulingTestBase {
 				slotSharingGroupId,
 				coLocationConstraint1),
 			true,
-			SlotProfile.noRequirements(),
-			TestingUtils.infiniteTime());
+			Collections.emptyList());
 
 		CompletableFuture<LogicalSlot> logicalSlotFuture21 = slotProvider.allocateSlot(
 			new ScheduledUnit(
@@ -106,8 +102,7 @@ public class SlotPoolCoLocationTest extends SlotPoolSchedulingTestBase {
 				slotSharingGroupId,
 				coLocationConstraint2),
 			true,
-			SlotProfile.noRequirements(),
-			TestingUtils.infiniteTime());
+			Collections.emptyList());
 
 		final AllocationID allocationId1 = allocationIds.take();
 		final AllocationID allocationId2 = allocationIds.take();

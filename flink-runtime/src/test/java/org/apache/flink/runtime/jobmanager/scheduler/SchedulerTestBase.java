@@ -19,24 +19,20 @@
 package org.apache.flink.runtime.jobmanager.scheduler;
 
 import org.apache.flink.api.common.JobID;
-import org.apache.flink.api.common.time.Time;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
-import org.apache.flink.runtime.clusterframework.types.SlotProfile;
 import org.apache.flink.runtime.executiongraph.utils.SimpleAckingTaskManagerGateway;
 import org.apache.flink.runtime.instance.Instance;
+import org.apache.flink.runtime.jobmaster.LogicalSlot;
+import org.apache.flink.runtime.jobmaster.slotpool.SlotSharingManager;
+import org.apache.flink.runtime.jobmaster.slotpool.SlotPool;
+import org.apache.flink.runtime.jobmaster.slotpool.SlotPoolGateway;
+import org.apache.flink.runtime.jobmaster.slotpool.SlotProvider;
 import org.apache.flink.runtime.instance.SlotSharingGroupId;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobmanager.slots.TaskManagerGateway;
 import org.apache.flink.runtime.jobmaster.JobMasterId;
-import org.apache.flink.runtime.jobmaster.LogicalSlot;
-import org.apache.flink.runtime.jobmaster.SlotRequestId;
-import org.apache.flink.runtime.jobmaster.slotpool.SlotPool;
-import org.apache.flink.runtime.jobmaster.slotpool.SlotPoolGateway;
-import org.apache.flink.runtime.jobmaster.slotpool.SlotProvider;
-import org.apache.flink.runtime.jobmaster.slotpool.SlotSharingManager;
-import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.rpc.RpcService;
 import org.apache.flink.runtime.rpc.RpcUtils;
 import org.apache.flink.runtime.rpc.TestingRpcService;
@@ -51,8 +47,6 @@ import org.apache.flink.util.TestLogger;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.runners.Parameterized;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -122,7 +116,7 @@ public class SchedulerTestBase extends TestLogger {
 		}
 
 		if (rpcService != null) {
-			rpcService.stopService().get();
+			rpcService.stopService();
 			rpcService = null;
 		}
 	}
@@ -157,18 +151,8 @@ public class SchedulerTestBase extends TestLogger {
 		}
 
 		@Override
-		public CompletableFuture<LogicalSlot> allocateSlot(
-			SlotRequestId slotRequestId,
-			ScheduledUnit task,
-			boolean allowQueued,
-			SlotProfile slotProfile,
-			Time allocationTimeout) {
-			return scheduler.allocateSlot(task, allowQueued, slotProfile, allocationTimeout);
-		}
-
-		@Override
-		public CompletableFuture<Acknowledge> cancelSlotRequest(SlotRequestId slotRequestId, @Nullable SlotSharingGroupId slotSharingGroupId, Throwable cause) {
-			return CompletableFuture.completedFuture(Acknowledge.get());
+		public CompletableFuture<LogicalSlot> allocateSlot(ScheduledUnit task, boolean allowQueued, Collection<TaskManagerLocation> preferredLocations) {
+			return scheduler.allocateSlot(task, allowQueued, preferredLocations);
 		}
 
 		@Override
@@ -355,13 +339,8 @@ public class SchedulerTestBase extends TestLogger {
 		}
 
 		@Override
-		public CompletableFuture<LogicalSlot> allocateSlot(
-			SlotRequestId slotRequestId,
-			ScheduledUnit task,
-			boolean allowQueued,
-			SlotProfile slotProfile,
-			Time allocationTimeout) {
-			return slotProvider.allocateSlot(task, allowQueued, slotProfile, allocationTimeout).thenApply(
+		public CompletableFuture<LogicalSlot> allocateSlot(ScheduledUnit task, boolean allowQueued, Collection<TaskManagerLocation> preferredLocations) {
+			return slotProvider.allocateSlot(task, allowQueued, preferredLocations).thenApply(
 				(LogicalSlot logicalSlot) -> {
 					switch (logicalSlot.getLocality()) {
 						case LOCAL:
@@ -382,11 +361,6 @@ public class SchedulerTestBase extends TestLogger {
 
 					return logicalSlot;
 				});
-		}
-
-		@Override
-		public CompletableFuture<Acknowledge> cancelSlotRequest(SlotRequestId slotRequestId, @Nullable SlotSharingGroupId slotSharingGroupId, Throwable cause) {
-			return CompletableFuture.completedFuture(Acknowledge.get());
 		}
 	}
 

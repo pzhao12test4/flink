@@ -627,7 +627,6 @@ public class PipelinedFailoverRegionBuildingTest extends TestLogger {
 				JobManagerOptions.EXECUTION_FAILOVER_STRATEGY,
 				FailoverStrategyLoader.PIPELINED_REGION_RESTART_STRATEGY_NAME);
 
-		final Time timeout = Time.seconds(10L);
 		return ExecutionGraphBuilder.buildGraph(
 			null,
 			jobGraph,
@@ -637,12 +636,11 @@ public class PipelinedFailoverRegionBuildingTest extends TestLogger {
 			mock(SlotProvider.class),
 			PipelinedFailoverRegionBuildingTest.class.getClassLoader(),
 			new StandaloneCheckpointRecoveryFactory(),
-			timeout,
+			Time.seconds(10),
 			new NoRestartStrategy(),
 			new UnregisteredMetricsGroup(),
 			1000,
 			VoidBlobWriter.getInstance(),
-			timeout,
 			log);
 	}
 }

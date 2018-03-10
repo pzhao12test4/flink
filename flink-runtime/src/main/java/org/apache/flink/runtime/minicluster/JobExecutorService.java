@@ -18,10 +18,20 @@
 
 package org.apache.flink.runtime.minicluster;
 
-import org.apache.flink.util.AutoCloseableAsync;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Interface to control {@link JobExecutor}.
  */
-public interface JobExecutorService extends JobExecutor, AutoCloseableAsync {
+public interface JobExecutorService extends JobExecutor {
+
+	/**
+	 * Terminate the given JobExecutorService.
+	 *
+	 * <p>This method can be implemented asynchronously. Therefore it returns a future
+	 * which is completed once the termination has been done.
+	 *
+	 * @return Termination future which can also contain an exception if the termination went wrong
+	 */
+	CompletableFuture<?> terminate();
 }

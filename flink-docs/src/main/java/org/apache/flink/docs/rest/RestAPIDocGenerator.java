@@ -120,7 +120,9 @@ public class RestAPIDocGenerator {
 		List<MessageHeaders> specs = restEndpoint.getSpecs();
 		specs.forEach(spec -> html.append(createHtmlEntry(spec)));
 
-		Files.deleteIfExists(outputFile);
+		if (Files.exists(outputFile)) {
+			Files.delete(outputFile);
+		}
 		Files.write(outputFile, html.toString().getBytes(StandardCharsets.UTF_8));
 	}
 
@@ -286,18 +288,8 @@ public class RestAPIDocGenerator {
 			metricQueryServiceRetriever = path -> null;
 		}
 
-		private DocumentingDispatcherRestEndpoint() throws IOException {
-			super(
-				restConfig,
-				dispatcherGatewayRetriever,
-				config,
-				handlerConfig,
-				resourceManagerGatewayRetriever,
-				NoOpTransientBlobService.INSTANCE,
-				executor,
-				metricQueryServiceRetriever,
-				NoOpElectionService.INSTANCE,
-				NoOpFatalErrorHandler.INSTANCE);
+		private DocumentingDispatcherRestEndpoint() {
+			super(restConfig, dispatcherGatewayRetriever, config, handlerConfig, resourceManagerGatewayRetriever, executor, metricQueryServiceRetriever, NoOpElectionService.INSTANCE, NoOpFatalErrorHandler.INSTANCE);
 		}
 
 		@Override

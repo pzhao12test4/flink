@@ -23,8 +23,6 @@ import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.util.ExceptionUtils;
 import org.apache.flink.util.Preconditions;
 
-import javax.annotation.Nonnull;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.concurrent.RunnableFuture;
@@ -33,11 +31,8 @@ import java.util.concurrent.RunnableFuture;
  * This class is a default implementation for StateSnapshotContext.
  */
 public class StateSnapshotContextSynchronousImpl implements StateSnapshotContext, Closeable {
-
-	/** Checkpoint id of the snapshot. */
+	
 	private final long checkpointId;
-
-	/** Checkpoint timestamp of the snapshot. */
 	private final long checkpointTimestamp;
 	
 	/** Factory for he checkpointing stream */
@@ -52,10 +47,7 @@ public class StateSnapshotContextSynchronousImpl implements StateSnapshotContext
 	 */
 	private final CloseableRegistry closableRegistry;
 
-	/** Output stream for the raw keyed state. */
 	private KeyedStateCheckpointOutputStream keyedStateCheckpointOutputStream;
-
-	/** Output stream for the raw operator state. */
 	private OperatorStateCheckpointOutputStream operatorStateCheckpointOutputStream;
 
 	@VisibleForTesting
@@ -94,7 +86,7 @@ public class StateSnapshotContextSynchronousImpl implements StateSnapshotContext
 
 	private CheckpointStreamFactory.CheckpointStateOutputStream openAndRegisterNewStream() throws Exception {
 		CheckpointStreamFactory.CheckpointStateOutputStream cout =
-				streamFactory.createCheckpointStateOutputStream(CheckpointedStateScope.EXCLUSIVE);
+				streamFactory.createCheckpointStateOutputStream(checkpointId, checkpointTimestamp);
 
 		closableRegistry.registerCloseable(cout);
 		return cout;
@@ -117,23 +109,14 @@ public class StateSnapshotContextSynchronousImpl implements StateSnapshotContext
 		return operatorStateCheckpointOutputStream;
 	}
 
-	@Nonnull
-	public RunnableFuture<SnapshotResult<KeyedStateHandle>> getKeyedStateStreamFuture() throws IOException {
-		KeyedStateHandle keyGroupsStateHandle =
-			closeAndUnregisterStreamToObtainStateHandle(keyedStateCheckpointOutputStream);
-		return toDoneFutureOfSnapshotResult(keyGroupsStateHandle);
+	public RunnableFuture<KeyedStateHandle> getKeyedStateStreamFuture() throws IOException {
+		KeyGroupsStateHandle keyGroupsStateHandle = closeAndUnregisterStreamToObtainStateHandle(keyedStateCheckpointOutputStream);
+		return new DoneFuture<KeyedStateHandle>(keyGroupsStateHandle);
 	}
 
-	@Nonnull
-	public RunnableFuture<SnapshotResult<OperatorStateHandle>> getOperatorStateStreamFuture() throws IOException {
-		OperatorStateHandle operatorStateHandle =
-			closeAndUnregisterStreamToObtainStateHandle(operatorStateCheckpointOutputStream);
-		return toDoneFutureOfSnapshotResult(operatorStateHandle);
-	}
-
-	private <T extends StateObject> RunnableFuture<SnapshotResult<T>> toDoneFutureOfSnapshotResult(T handle) {
-		SnapshotResult<T> snapshotResult = SnapshotResult.of(handle);
-		return DoneFuture.of(snapshotResult);
+	public RunnableFuture<OperatorStateHandle> getOperatorStateStreamFuture() throws IOException {
+		OperatorStateHandle operatorStateHandle = closeAndUnregisterStreamToObtainStateHandle(operatorStateCheckpointOutputStream);
+		return new DoneFuture<>(operatorStateHandle);
 	}
 
 	private <T extends StreamStateHandle> T closeAndUnregisterStreamToObtainStateHandle(
@@ -147,7 +130,7 @@ public class StateSnapshotContextSynchronousImpl implements StateSnapshotContext
 	}
 
 	private <T extends StreamStateHandle> void closeAndUnregisterStream(
-		NonClosingCheckpointOutputStream<? extends T> stream) throws IOException {
+		NonClosingCheckpointOutputStream<T> stream) throws IOException {
 
 		Preconditions.checkNotNull(stream);
 
@@ -166,7 +149,9 @@ public class StateSnapshotContextSynchronousImpl implements StateSnapshotContext
 			try {
 				closeAndUnregisterStream(keyedStateCheckpointOutputStream);
 			} catch (IOException e) {
-				exception = new IOException("Could not close the raw keyed state checkpoint output stream.", e);
+				exception = ExceptionUtils.firstOrSuppressed(
+					new IOException("Could not close the raw keyed state checkpoint output stream.", e),
+					exception);
 			}
 		}
 

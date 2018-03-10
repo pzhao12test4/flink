@@ -18,16 +18,15 @@
 
 package org.apache.flink.runtime.operators.sort;
 
-import org.apache.flink.runtime.io.disk.iomanager.ChannelWriterOutputView;
-import org.apache.flink.util.Disposable;
-import org.apache.flink.util.MutableObjectIterator;
-
 import java.io.IOException;
+
+import org.apache.flink.runtime.io.disk.iomanager.ChannelWriterOutputView;
+import org.apache.flink.util.MutableObjectIterator;
 
 /**
  *
  */
-public interface InMemorySorter<T> extends IndexedSortable, Disposable {
+public interface InMemorySorter<T> extends IndexedSortable {
 	
 	/**
 	 * Resets the sort buffer back to the state where it is empty. All contained data is discarded.
@@ -40,12 +39,11 @@ public interface InMemorySorter<T> extends IndexedSortable, Disposable {
 	 * @return True, if no record is contained, false otherwise.
 	 */
 	boolean isEmpty();
-
+	
 	/**
 	 * Disposes the sorter.
 	 * This method does not release the memory segments used by the sorter.
 	 */
-	@Override
 	void dispose();
 	
 	/**

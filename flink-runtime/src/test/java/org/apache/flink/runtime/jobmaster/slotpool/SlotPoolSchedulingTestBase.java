@@ -64,9 +64,9 @@ public class SlotPoolSchedulingTestBase extends TestLogger {
 	}
 
 	@AfterClass
-	public static void teardown() throws ExecutionException, InterruptedException {
+	public static void teardown() {
 		if (testingRpcService != null) {
-			testingRpcService.stopService().get();
+			testingRpcService.stopService();
 			testingRpcService = null;
 		}
 	}

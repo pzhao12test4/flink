@@ -17,20 +17,18 @@
  */
 package org.apache.flink.table.codegen.calls
 
-import java.math.MathContext
-
 import org.apache.calcite.avatica.util.DateTimeUtils.MILLIS_PER_DAY
 import org.apache.calcite.avatica.util.{DateTimeUtils, TimeUnitRange}
 import org.apache.calcite.util.BuiltInMethod
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo._
 import org.apache.flink.api.common.typeinfo._
+import org.apache.flink.api.common.typeutils.CompositeType
 import org.apache.flink.api.java.typeutils.{MapTypeInfo, ObjectArrayTypeInfo, RowTypeInfo}
-import org.apache.flink.table.api.TableConfig
 import org.apache.flink.table.codegen.CodeGenUtils._
 import org.apache.flink.table.codegen.calls.CallGenerator.generateCallIfArgsNotNull
 import org.apache.flink.table.codegen.{CodeGenException, CodeGenerator, GeneratedExpression}
-import org.apache.flink.table.typeutils.TypeCheckUtils._
 import org.apache.flink.table.typeutils.{TimeIndicatorTypeInfo, TimeIntervalTypeInfo, TypeCoercion}
+import org.apache.flink.table.typeutils.TypeCheckUtils._
 
 object ScalarOperators {
 
@@ -49,8 +47,7 @@ object ScalarOperators {
       nullCheck: Boolean,
       resultType: TypeInformation[_],
       left: GeneratedExpression,
-      right: GeneratedExpression,
-      config: TableConfig): GeneratedExpression = {
+      right: GeneratedExpression): GeneratedExpression = {
 
     val leftCasting = operator match {
       case "%" =>
@@ -72,15 +69,7 @@ object ScalarOperators {
     generateOperatorIfNotNull(nullCheck, resultType, left, right) {
       (leftTerm, rightTerm) =>
         if (isDecimal(resultType)) {
-          val decMethod = arithOpToDecMethod(operator)
-          operator match {
-            // include math context for decimal division
-            case "/" =>
-              val mathContext = mathContextToString(config.getDecimalContext)
-              s"${leftCasting(leftTerm)}.$decMethod(${rightCasting(rightTerm)}, $mathContext)"
-            case _ =>
-              s"${leftCasting(leftTerm)}.$decMethod(${rightCasting(rightTerm)})"
-          }
+          s"${leftCasting(leftTerm)}.${arithOpToDecMethod(operator)}(${rightCasting(rightTerm)})"
         } else {
           s"($resultTypeTerm) (${leftCasting(leftTerm)} $operator ${rightCasting(rightTerm)})"
         }
@@ -826,15 +815,14 @@ object ScalarOperators {
       plus: Boolean,
       nullCheck: Boolean,
       left: GeneratedExpression,
-      right: GeneratedExpression,
-      config: TableConfig)
+      right: GeneratedExpression)
     : GeneratedExpression = {
 
     val op = if (plus) "+" else "-"
 
     (left.resultType, right.resultType) match {
       case (l: TimeIntervalTypeInfo[_], r: TimeIntervalTypeInfo[_]) if l == r =>
-        generateArithmeticOperator(op, nullCheck, l, left, right, config)
+        generateArithmeticOperator(op, nullCheck, l, left, right)
 
       case (SqlTimeTypeInfo.DATE, TimeIntervalTypeInfo.INTERVAL_MILLIS) =>
         generateOperatorIfNotNull(nullCheck, SqlTimeTypeInfo.DATE, left, right) {
@@ -1181,9 +1169,9 @@ object ScalarOperators {
       s"""
          |${map.code}
          |${key.code}
-         |$resultTypeTerm $resultTerm = (${map.nullTerm} || ${key.nullTerm}) ?
+         |boolean $nullTerm = (${map.nullTerm} || ${key.nullTerm});
+         |$resultTypeTerm $resultTerm = $nullTerm ?
          |  null : ($resultTypeTerm) ${map.resultTerm}.get(${key.resultTerm});
-         |boolean $nullTerm = $resultTerm == null;
          |""".stripMargin
     } else {
       s"""
@@ -1193,14 +1181,7 @@ object ScalarOperators {
          | ${map.resultTerm}.get(${key.resultTerm});
          |""".stripMargin
     }
-    val unboxing = codeGenerator.generateInputFieldUnboxing(resultType, resultTerm)
-
-    unboxing.copy(code =
-      s"""
-         |$accessCode
-         |${unboxing.code}
-         |""".stripMargin
-    )
+    GeneratedExpression(resultTerm, nullTerm, accessCode, resultType)
   }
 
   def generateMapCardinality(
@@ -1301,14 +1282,6 @@ object ScalarOperators {
     case "/" => "divide"
     case "%" => "remainder"
     case _ => throw new CodeGenException(s"Unsupported decimal arithmetic operator: '$operator'")
-  }
-
-  private def mathContextToString(mathContext: MathContext): String = mathContext match {
-    case MathContext.DECIMAL32 => "java.math.MathContext.DECIMAL32"
-    case MathContext.DECIMAL64 => "java.math.MathContext.DECIMAL64"
-    case MathContext.DECIMAL128 => "java.math.MathContext.DECIMAL128"
-    case MathContext.UNLIMITED => "java.math.MathContext.UNLIMITED"
-    case _ => s"""new java.math.MathContext("$mathContext")"""
   }
 
   private def numericCasting(

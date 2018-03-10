@@ -18,8 +18,6 @@
 
 package org.apache.flink.runtime.testutils;
 
-import org.apache.flink.util.ShutdownHookUtil;
-
 import org.apache.commons.lang3.ArrayUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -231,7 +229,18 @@ public abstract class TestJvmProcess {
 			}
 			finally {
 				destroyed = true;
-				ShutdownHookUtil.removeShutdownHook(shutdownHook, getClass().getSimpleName(), LOG);
+
+				if (shutdownHook != null && shutdownHook != Thread.currentThread()) {
+					try {
+						Runtime.getRuntime().removeShutdownHook(shutdownHook);
+					}
+					catch (IllegalStateException ignored) {
+						// JVM is in shutdown already, we can safely ignore this.
+					}
+					catch (Throwable t) {
+						LOG.warn("Exception while unregistering process cleanup shutdown hook.");
+					}
+				}
 			}
 		}
 	}

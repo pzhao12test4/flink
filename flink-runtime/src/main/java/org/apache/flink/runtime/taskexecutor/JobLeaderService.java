@@ -190,12 +190,7 @@ public class JobLeaderService {
 
 		JobLeaderService.JobManagerLeaderListener jobManagerLeaderListener = new JobManagerLeaderListener(jobId);
 
-		final Tuple2<LeaderRetrievalService, JobManagerLeaderListener> oldEntry = jobLeaderServices.put(jobId, Tuple2.of(leaderRetrievalService, jobManagerLeaderListener));
-
-		if (oldEntry != null) {
-			oldEntry.f0.stop();
-			oldEntry.f1.stop();
-		}
+		jobLeaderServices.put(jobId, Tuple2.of(leaderRetrievalService, jobManagerLeaderListener));
 
 		leaderRetrievalService.start(jobManagerLeaderListener);
 	}

@@ -25,7 +25,6 @@ import org.apache.flink.core.fs.Path;
 
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.util.Arrays;
 
 /**
  * Input Format that reads text files. Each line results in another element.
@@ -99,11 +98,6 @@ public class TextInputFormat extends DelimitedInputFormat<String> {
 
 	@Override
 	public String toString() {
-		return "TextInputFormat (" + Arrays.toString(getFilePaths()) + ") - " + this.charsetName;
-	}
-
-	@Override
-	public boolean supportsMultiPaths() {
-		return true;
+		return "TextInputFormat (" + getFilePath() + ") - " + this.charsetName;
 	}
 }

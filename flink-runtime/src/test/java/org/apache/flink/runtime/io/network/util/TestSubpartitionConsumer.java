@@ -29,7 +29,7 @@ import java.util.Random;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -40,7 +40,6 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  *
  * @see TestConsumerCallback
  */
-@Deprecated
 public class TestSubpartitionConsumer implements Callable<Boolean>, BufferAvailabilityListener {
 
 	private static final int MAX_SLEEP_TIME_MS = 20;
@@ -62,7 +61,7 @@ public class TestSubpartitionConsumer implements Callable<Boolean>, BufferAvaila
 	/** Random source for sleeps. */
 	private final Random random;
 
-	private final AtomicBoolean dataAvailableNotification = new AtomicBoolean(false);
+	private final AtomicLong numBuffersAvailable = new AtomicLong();
 
 	public TestSubpartitionConsumer(
 		boolean isSlowConsumer,
@@ -85,9 +84,11 @@ public class TestSubpartitionConsumer implements Callable<Boolean>, BufferAvaila
 					throw new InterruptedException();
 				}
 
-				synchronized (dataAvailableNotification) {
-					while (!dataAvailableNotification.getAndSet(false)) {
-						dataAvailableNotification.wait();
+				if (numBuffersAvailable.get() == 0) {
+					synchronized (numBuffersAvailable) {
+						while (numBuffersAvailable.get() == 0) {
+							numBuffersAvailable.wait();
+						}
 					}
 				}
 
@@ -98,9 +99,8 @@ public class TestSubpartitionConsumer implements Callable<Boolean>, BufferAvaila
 				}
 
 				if (bufferAndBacklog != null) {
-					if (bufferAndBacklog.isMoreAvailable()) {
-						dataAvailableNotification.set(true);
-					}
+					numBuffersAvailable.decrementAndGet();
+
 					if (bufferAndBacklog.buffer().isBuffer()) {
 						callback.onBuffer(bufferAndBacklog.buffer());
 					} else {
@@ -127,10 +127,12 @@ public class TestSubpartitionConsumer implements Callable<Boolean>, BufferAvaila
 	}
 
 	@Override
-	public void notifyDataAvailable() {
-		synchronized (dataAvailableNotification) {
-			dataAvailableNotification.set(true);
-			dataAvailableNotification.notifyAll();
+	public void notifyBuffersAvailable(long numBuffers) {
+		if (numBuffers > 0 && numBuffersAvailable.getAndAdd(numBuffers) == 0) {
+			synchronized (numBuffersAvailable) {
+				numBuffersAvailable.notifyAll();
+			}
+			;
 		}
 	}
 }

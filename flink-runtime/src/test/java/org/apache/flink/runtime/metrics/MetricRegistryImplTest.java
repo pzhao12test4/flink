@@ -59,12 +59,12 @@ public class MetricRegistryImplTest extends TestLogger {
 	private static final char GLOBAL_DEFAULT_DELIMITER = '.';
 
 	@Test
-	public void testIsShutdown() throws Exception {
+	public void testIsShutdown() {
 		MetricRegistryImpl metricRegistry = new MetricRegistryImpl(MetricRegistryConfiguration.defaultMetricRegistryConfiguration());
 
 		Assert.assertFalse(metricRegistry.isShutdown());
 
-		metricRegistry.shutdown().get();
+		metricRegistry.shutdown();
 
 		Assert.assertTrue(metricRegistry.isShutdown());
 	}
@@ -73,7 +73,7 @@ public class MetricRegistryImplTest extends TestLogger {
 	 * Verifies that the reporter name list is correctly used to determine which reporters should be instantiated.
 	 */
 	@Test
-	public void testReporterInclusion() throws Exception {
+	public void testReporterInclusion() {
 		Configuration config = new Configuration();
 
 		config.setString(MetricOptions.REPORTERS_LIST, "test");
@@ -87,7 +87,7 @@ public class MetricRegistryImplTest extends TestLogger {
 		Assert.assertTrue(TestReporter1.wasOpened);
 		Assert.assertFalse(TestReporter11.wasOpened);
 
-		metricRegistry.shutdown().get();
+		metricRegistry.shutdown();
 	}
 
 	/**
@@ -106,7 +106,7 @@ public class MetricRegistryImplTest extends TestLogger {
 	 * Verifies that multiple reporters are instantiated correctly.
 	 */
 	@Test
-	public void testMultipleReporterInstantiation() throws Exception {
+	public void testMultipleReporterInstantiation() {
 		Configuration config = new Configuration();
 
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test1." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, TestReporter11.class.getName());
@@ -121,7 +121,7 @@ public class MetricRegistryImplTest extends TestLogger {
 		Assert.assertTrue(TestReporter12.wasOpened);
 		Assert.assertTrue(TestReporter13.wasOpened);
 
-		metricRegistry.shutdown().get();
+		metricRegistry.shutdown();
 	}
 
 	/**
@@ -164,14 +164,14 @@ public class MetricRegistryImplTest extends TestLogger {
 	 * Verifies that configured arguments are properly forwarded to the reporter.
 	 */
 	@Test
-	public void testReporterArgumentForwarding() throws Exception {
+	public void testReporterArgumentForwarding() {
 		Configuration config = new Configuration();
 
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, TestReporter2.class.getName());
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test.arg1", "hello");
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test.arg2", "world");
 
-		new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(config)).shutdown().get();
+		new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(config)).shutdown();
 
 		Assert.assertEquals("hello", TestReporter2.mc.getString("arg1", null));
 		Assert.assertEquals("world", TestReporter2.mc.getString("arg2", null));
@@ -190,9 +190,11 @@ public class MetricRegistryImplTest extends TestLogger {
 
 	/**
 	 * Verifies that reporters implementing the Scheduled interface are regularly called to report the metrics.
+	 *
+	 * @throws InterruptedException
 	 */
 	@Test
-	public void testReporterScheduling() throws Exception {
+	public void testReporterScheduling() throws InterruptedException {
 		Configuration config = new Configuration();
 
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, TestReporter3.class.getName());
@@ -223,7 +225,7 @@ public class MetricRegistryImplTest extends TestLogger {
 		}
 		Assert.assertTrue("No report was triggered.", TestReporter3.reportCount > 0);
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	/**
@@ -242,7 +244,7 @@ public class MetricRegistryImplTest extends TestLogger {
 	 * Verifies that reporters are notified of added/removed metrics.
 	 */
 	@Test
-	public void testReporterNotifications() throws Exception {
+	public void testReporterNotifications() {
 		Configuration config = new Configuration();
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test1." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, TestReporter6.class.getName());
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test2." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, TestReporter7.class.getName());
@@ -266,7 +268,7 @@ public class MetricRegistryImplTest extends TestLogger {
 		assertTrue(TestReporter7.removedMetric instanceof Counter);
 		assertEquals("rootCounter", TestReporter7.removedMetricName);
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	/**
@@ -336,7 +338,7 @@ public class MetricRegistryImplTest extends TestLogger {
 	}
 
 	@Test
-	public void testConfigurableDelimiter() throws Exception {
+	public void testConfigurableDelimiter() {
 		Configuration config = new Configuration();
 		config.setString(MetricOptions.SCOPE_DELIMITER, "_");
 		config.setString(MetricOptions.SCOPE_NAMING_TM, "A.B.C.D.E");
@@ -346,11 +348,11 @@ public class MetricRegistryImplTest extends TestLogger {
 		TaskManagerMetricGroup tmGroup = new TaskManagerMetricGroup(registry, "host", "id");
 		assertEquals("A_B_C_D_E_name", tmGroup.getMetricIdentifier("name"));
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	@Test
-	public void testConfigurableDelimiterForReporters() throws Exception {
+	public void testConfigurableDelimiterForReporters() {
 		Configuration config = new Configuration();
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test1." + ConfigConstants.METRICS_REPORTER_SCOPE_DELIMITER, "_");
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test1." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, TestReporter.class.getName());
@@ -368,11 +370,11 @@ public class MetricRegistryImplTest extends TestLogger {
 		assertEquals(GLOBAL_DEFAULT_DELIMITER, registry.getDelimiter(3));
 		assertEquals(GLOBAL_DEFAULT_DELIMITER, registry.getDelimiter(-1));
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	@Test
-	public void testConfigurableDelimiterForReportersInGroup() throws Exception {
+	public void testConfigurableDelimiterForReportersInGroup() {
 		Configuration config = new Configuration();
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test1." + ConfigConstants.METRICS_REPORTER_SCOPE_DELIMITER, "_");
 		config.setString(ConfigConstants.METRICS_REPORTER_PREFIX + "test1." + ConfigConstants.METRICS_REPORTER_CLASS_SUFFIX, TestReporter8.class.getName());
@@ -393,7 +395,7 @@ public class MetricRegistryImplTest extends TestLogger {
 		TaskManagerMetricGroup group = new TaskManagerMetricGroup(registry, "host", "id");
 		group.counter("C");
 		group.close();
-		registry.shutdown().get();
+		registry.shutdown();
 		assertEquals(4, TestReporter8.numCorrectDelimitersForRegister);
 		assertEquals(4, TestReporter8.numCorrectDelimitersForUnregister);
 	}
@@ -413,7 +415,7 @@ public class MetricRegistryImplTest extends TestLogger {
 
 		ActorRef queryServiceActor = registry.getQueryService();
 
-		registry.shutdown().get();
+		registry.shutdown();
 
 		try {
 			Await.result(actorSystem.actorSelection(queryServiceActor.path()).resolveOne(timeout), timeout);
@@ -469,7 +471,7 @@ public class MetricRegistryImplTest extends TestLogger {
 		assertEquals(metric, TestReporter7.removedMetric);
 		assertEquals("counter", TestReporter7.removedMetricName);
 
-		registry.shutdown().get();
+		registry.shutdown();
 	}
 
 	/**

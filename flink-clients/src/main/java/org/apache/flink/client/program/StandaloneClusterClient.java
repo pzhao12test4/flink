@@ -47,8 +47,8 @@ public class StandaloneClusterClient extends ClusterClient<StandaloneClusterId> 
 		super(config);
 	}
 
-	public StandaloneClusterClient(Configuration config, HighAvailabilityServices highAvailabilityServices, boolean sharedHaServices) {
-		super(config, highAvailabilityServices, sharedHaServices);
+	public StandaloneClusterClient(Configuration config, HighAvailabilityServices highAvailabilityServices) {
+		super(config, highAvailabilityServices);
 	}
 
 	@Override
@@ -107,7 +107,7 @@ public class StandaloneClusterClient extends ClusterClient<StandaloneClusterId> 
 	}
 
 	@Override
-	public JobSubmissionResult submitJob(JobGraph jobGraph, ClassLoader classLoader)
+	protected JobSubmissionResult submitJob(JobGraph jobGraph, ClassLoader classLoader)
 			throws ProgramInvocationException {
 		if (isDetached()) {
 			return super.runDetached(jobGraph, classLoader);

@@ -55,14 +55,12 @@ public class YARNITCase extends YarnTestBase {
 	public void testPerJobMode() throws Exception {
 		Configuration configuration = new Configuration();
 		configuration.setString(AkkaOptions.ASK_TIMEOUT, "30 s");
-		final YarnClient yarnClient = getYarnClient();
+		final YarnClient yarnClient = YarnClient.createYarnClient();
 
 		try (final Flip6YarnClusterDescriptor flip6YarnClusterDescriptor = new Flip6YarnClusterDescriptor(
 			configuration,
-			getYarnConfiguration(),
 			System.getenv(ConfigConstants.ENV_FLINK_CONF_DIR),
-			yarnClient,
-			true)) {
+			yarnClient)) {
 
 			flip6YarnClusterDescriptor.setLocalJarPath(new Path(flinkUberjar.getAbsolutePath()));
 			flip6YarnClusterDescriptor.addShipFiles(Arrays.asList(flinkLibFolder.listFiles()));
@@ -87,10 +85,7 @@ public class YARNITCase extends YarnTestBase {
 
 			jobGraph.addJar(new org.apache.flink.core.fs.Path(testingJar.toURI()));
 
-			ClusterClient<ApplicationId> clusterClient = flip6YarnClusterDescriptor.deployJobCluster(
-				clusterSpecification,
-				jobGraph,
-				true);
+			ClusterClient<ApplicationId> clusterClient = flip6YarnClusterDescriptor.deployJobCluster(clusterSpecification, jobGraph);
 
 			clusterClient.shutdown();
 		}

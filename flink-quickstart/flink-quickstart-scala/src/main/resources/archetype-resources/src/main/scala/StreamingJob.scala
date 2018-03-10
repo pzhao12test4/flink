@@ -1,4 +1,6 @@
-/*
+package ${package}
+
+/**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -16,28 +18,36 @@
  * limitations under the License.
  */
 
-package ${package}
-
 import org.apache.flink.streaming.api.scala._
 
 /**
  * Skeleton for a Flink Streaming Job.
  *
- * For a tutorial how to write a Flink streaming application, check the
- * tutorials and examples on the <a href="http://flink.apache.org/docs/stable/">Flink Website</a>.
+ * For a full example of a Flink Streaming Job, see the SocketTextStreamWordCount.java
+ * file in the same package/directory or have a look at the website.
  *
- * To package your appliation into a JAR file for execution, run
- * 'mvn clean package' on the command line.
+ * You can also generate a .jar file that you can submit on your Flink
+ * cluster. Just type
+ * {{{
+ *   mvn clean package
+ * }}}
+ * in the projects root directory. You will find the jar in
+ * target/${artifactId}-${version}.jar
+ * From the CLI you can then run
+ * {{{
+ *    ./bin/flink run -c ${package}.StreamingJob target/${artifactId}-${version}.jar
+ * }}}
  *
- * If you change the name of the main class (with the public static void main(String[] args))
- * method, change the respective entry in the POM.xml file (simply search for 'mainClass').
+ * For more information on the CLI see:
+ *
+ * http://flink.apache.org/docs/latest/apis/cli.html
  */
 object StreamingJob {
   def main(args: Array[String]) {
     // set up the streaming execution environment
     val env = StreamExecutionEnvironment.getExecutionEnvironment
 
-    /*
+    /**
      * Here, you can start creating your execution plan for Flink.
      *
      * Start with getting some data from the environment, like

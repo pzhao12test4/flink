@@ -21,12 +21,11 @@ package org.apache.flink.runtime.state.heap;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.base.IntSerializer;
-import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.state.KeyGroupsStateHandle;
+import org.apache.flink.runtime.state.KeyedStateHandle;
 import org.apache.flink.runtime.state.internal.InternalListState;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
-
 import org.junit.Test;
 
 import java.io.BufferedInputStream;
@@ -65,7 +64,7 @@ public class HeapKeyedStateBackendSnapshotMigrationTest extends HeapStateBackend
 			try (BufferedInputStream bis = new BufferedInputStream((new FileInputStream(resource.getFile())))) {
 				stateHandle = InstantiationUtil.deserializeObject(bis, Thread.currentThread().getContextClassLoader());
 			}
-			keyedBackend.restore(StateObjectCollection.singleton(stateHandle));
+			keyedBackend.restore(Collections.<KeyedStateHandle>singleton(stateHandle));
 			final ListStateDescriptor<Long> stateDescr = new ListStateDescriptor<>("my-state", Long.class);
 			stateDescr.initializeSerializerUnlessSet(new ExecutionConfig());
 
@@ -159,7 +158,7 @@ public class HeapKeyedStateBackendSnapshotMigrationTest extends HeapStateBackend
 //					0L,
 //					0L,
 //					new MemCheckpointStreamFactory(4 * 1024 * 1024),
-//					CheckpointOptions.forCheckpointWithDefaultLocation());
+//					CheckpointOptions.forCheckpoint());
 //
 //			snapshot.run();
 //

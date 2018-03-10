@@ -28,20 +28,19 @@ import java.util.concurrent.TimeUnit;
  * <a href="https://github.com/dataArtisans/flink-benchmarks">flink-benchmarks</a> project.
  */
 public class StreamNetworkThroughputBenchmark {
+	private static final long RECEIVER_TIMEOUT = 30_000;
+
 	private StreamNetworkBenchmarkEnvironment<LongValue> environment;
 	private ReceiverThread receiver;
 	private LongRecordWriterThread[] writerThreads;
 
-	public void executeBenchmark(long records) throws Exception {
-		executeBenchmark(records, Long.MAX_VALUE);
-	}
-
 	/**
 	 * Executes the throughput benchmark with the given number of records.
 	 *
-	 * @param records to pass through the network stack
+	 * @param records
+	 * 		records to pass through the network stack
 	 */
-	public void executeBenchmark(long records, long timeout) throws Exception {
+	public void executeBenchmark(long records) throws Exception {
 		final LongValue value = new LongValue();
 		value.setValue(0);
 
@@ -52,11 +51,7 @@ public class StreamNetworkThroughputBenchmark {
 			writerThread.setRecordsToSend(lastRecord);
 		}
 
-		recordsReceived.get(timeout, TimeUnit.MILLISECONDS);
-	}
-
-	public void setUp(int recordWriters, int channels, int flushTimeout) throws Exception {
-		setUp(recordWriters, channels, flushTimeout, false);
+		recordsReceived.get(RECEIVER_TIMEOUT, TimeUnit.MILLISECONDS);
 	}
 
 	/**
@@ -68,9 +63,9 @@ public class StreamNetworkThroughputBenchmark {
 	 * @param channels
 	 * 		number of outgoing channels / receivers
 	 */
-	public void setUp(int recordWriters, int channels, int flushTimeout, boolean localMode) throws Exception {
+	public void setUp(int recordWriters, int channels, int flushTimeout) throws Exception {
 		environment = new StreamNetworkBenchmarkEnvironment<>();
-		environment.setUp(recordWriters, channels, localMode);
+		environment.setUp(recordWriters, channels);
 		receiver = environment.createReceiver();
 		writerThreads = new LongRecordWriterThread[recordWriters];
 		for (int writer = 0; writer < recordWriters; writer++) {

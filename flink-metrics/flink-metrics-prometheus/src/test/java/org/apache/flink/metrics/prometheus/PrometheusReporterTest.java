@@ -44,8 +44,6 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 
 import java.util.Arrays;
-import java.util.Iterator;
-import java.util.NoSuchElementException;
 
 import static org.apache.flink.metrics.prometheus.PrometheusReporter.ARG_PORT;
 import static org.hamcrest.Matchers.containsString;
@@ -67,8 +65,6 @@ public class PrometheusReporterTest extends TestLogger {
 	private static final String DEFAULT_LABELS = "{" + DIMENSIONS + ",}";
 	private static final String SCOPE_PREFIX = "flink_taskmanager_";
 
-	private static final PortRangeProvider portRangeProvider = new PortRangeProvider();
-
 	@Rule
 	public ExpectedException thrown = ExpectedException.none();
 
@@ -78,15 +74,15 @@ public class PrometheusReporterTest extends TestLogger {
 
 	@Before
 	public void setupReporter() {
-		registry = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test1", portRangeProvider.next())));
+		registry = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test1", "9400-9500")));
 		metricGroup = new FrontMetricGroup<>(0, new TaskManagerMetricGroup(registry, HOST_NAME, TASK_MANAGER));
 		reporter = (PrometheusReporter) registry.getReporters().get(0);
 	}
 
 	@After
-	public void shutdownRegistry() throws Exception {
+	public void shutdownRegistry() {
 		if (registry != null) {
-			registry.shutdown().get();
+			registry.shutdown();
 		}
 	}
 
@@ -157,6 +153,15 @@ public class PrometheusReporterTest extends TestLogger {
 			assertThat(response, containsString(
 				summaryName + "{" + DIMENSIONS + ",quantile=\"" + quantile + "\",} " + quantile + "\n"));
 		}
+	}
+
+	@Test
+	public void endpointIsUnavailableAfterReporterIsClosed() throws UnirestException {
+		MetricRegistryImpl registry = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test1", "9400-9500")));
+		PrometheusReporter reporter = (PrometheusReporter) registry.getReporters().get(0);
+		reporter.close();
+		thrown.expect(UnirestException.class);
+		pollMetrics(reporter.getPort());
 	}
 
 	@Test
@@ -237,8 +242,8 @@ public class PrometheusReporterTest extends TestLogger {
 	}
 
 	@Test
-	public void cannotStartTwoReportersOnSamePort() throws Exception {
-		final MetricRegistryImpl fixedPort1 = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test1", portRangeProvider.next())));
+	public void cannotStartTwoReportersOnSamePort() {
+		final MetricRegistryImpl fixedPort1 = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test1", "9400-9500")));
 		assertThat(fixedPort1.getReporters(), hasSize(1));
 
 		PrometheusReporter firstReporter = (PrometheusReporter) fixedPort1.getReporters().get(0);
@@ -246,21 +251,20 @@ public class PrometheusReporterTest extends TestLogger {
 		final MetricRegistryImpl fixedPort2 = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test2", String.valueOf(firstReporter.getPort()))));
 		assertThat(fixedPort2.getReporters(), hasSize(0));
 
-		fixedPort1.shutdown().get();
-		fixedPort2.shutdown().get();
+		fixedPort1.shutdown();
+		fixedPort2.shutdown();
 	}
 
 	@Test
-	public void canStartTwoReportersWhenUsingPortRange() throws Exception {
-		String portRange = portRangeProvider.next();
-		final MetricRegistryImpl portRange1 = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test1", portRange)));
-		final MetricRegistryImpl portRange2 = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test2", portRange)));
+	public void canStartTwoReportersWhenUsingPortRange() {
+		final MetricRegistryImpl portRange1 = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test1", "9200-9300")));
+		final MetricRegistryImpl portRange2 = new MetricRegistryImpl(MetricRegistryConfiguration.fromConfiguration(createConfigWithOneReporter("test2", "9200-9300")));
 
 		assertThat(portRange1.getReporters(), hasSize(1));
 		assertThat(portRange2.getReporters(), hasSize(1));
 
-		portRange1.shutdown().get();
-		portRange2.shutdown().get();
+		portRange1.shutdown();
+		portRange2.shutdown();
 	}
 
 	private String addMetricAndPollResponse(Metric metric, String metricName) throws UnirestException {
@@ -280,35 +284,7 @@ public class PrometheusReporterTest extends TestLogger {
 	}
 
 	@After
-	public void closeReporterAndShutdownRegistry() throws Exception {
-		registry.shutdown().get();
-	}
-
-	/**
-	 * Utility class providing distinct port ranges.
-	 */
-	private static class PortRangeProvider implements Iterator<String> {
-
-		private int base = 9000;
-
-		@Override
-		public boolean hasNext() {
-			return base < 14000; // arbitrary limit that should be sufficient for test purposes
-		}
-
-		/**
-		 * Returns the next port range containing exactly 100 ports.
-		 *
-		 * @return next port range
-		 */
-		public String next() {
-			if (!hasNext()) {
-				throw new NoSuchElementException();
-			}
-			int lowEnd = base;
-			int highEnd = base + 99;
-			base += 100;
-			return String.valueOf(lowEnd) + "-" + String.valueOf(highEnd);
-		}
+	public void closeReporterAndShutdownRegistry() {
+		registry.shutdown();
 	}
 }

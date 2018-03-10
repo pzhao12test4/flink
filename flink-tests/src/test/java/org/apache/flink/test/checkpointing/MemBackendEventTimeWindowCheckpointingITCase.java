@@ -23,8 +23,7 @@ package org.apache.flink.test.checkpointing;
  */
 public class MemBackendEventTimeWindowCheckpointingITCase extends AbstractEventTimeWindowCheckpointingITCase {
 
-	@Override
-	protected StateBackendEnum getStateBackend() {
-		return StateBackendEnum.MEM;
+	public MemBackendEventTimeWindowCheckpointingITCase() {
+		super(StateBackendEnum.MEM);
 	}
 }

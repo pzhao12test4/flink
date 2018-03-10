@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.rest.messages.json;
 
-import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.SerializedThrowable;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
@@ -34,11 +33,11 @@ public class SerializedThrowableSerializer extends StdSerializer<SerializedThrow
 
 	private static final long serialVersionUID = 1L;
 
+	static final String FIELD_NAME_SERIALIZED_EXCEPTION = "serialized-exception";
+
 	static final String FIELD_NAME_CLASS = "class";
 
 	static final String FIELD_NAME_STACK_TRACE = "stack-trace";
-
-	static final String FIELD_NAME_SERIALIZED_THROWABLE = "serialized-throwable";
 
 	public SerializedThrowableSerializer() {
 		super(SerializedThrowable.class);
@@ -49,7 +48,7 @@ public class SerializedThrowableSerializer extends StdSerializer<SerializedThrow
 		gen.writeStartObject();
 		gen.writeStringField(FIELD_NAME_CLASS, value.getOriginalErrorClassName());
 		gen.writeStringField(FIELD_NAME_STACK_TRACE, value.getFullStringifiedStackTrace());
-		gen.writeBinaryField(FIELD_NAME_SERIALIZED_THROWABLE, InstantiationUtil.serializeObject(value));
+		gen.writeBinaryField(FIELD_NAME_SERIALIZED_EXCEPTION, value.getSerializedException());
 		gen.writeEndObject();
 	}
 

@@ -44,11 +44,10 @@ public class NettyConnectionManager implements ConnectionManager {
 	}
 
 	@Override
-	public void start(ResultPartitionProvider partitionProvider, TaskEventDispatcher taskEventDispatcher) throws IOException {
-		NettyProtocol partitionRequestProtocol = new NettyProtocol(
-			partitionProvider,
-			taskEventDispatcher,
-			client.getConfig().isCreditBasedEnabled());
+	public void start(ResultPartitionProvider partitionProvider, TaskEventDispatcher taskEventDispatcher)
+			throws IOException {
+		NettyProtocol partitionRequestProtocol =
+				new NettyProtocol(partitionProvider, taskEventDispatcher);
 
 		client.init(partitionRequestProtocol, bufferPool);
 		server.init(partitionRequestProtocol, bufferPool);

@@ -1268,9 +1268,6 @@ class JobManager(
             true
         }
 
-        val allocationTimeout: Long = flinkConfiguration.getLong(
-          JobManagerOptions.SLOT_REQUEST_TIMEOUT)
-
         executionGraph = ExecutionGraphBuilder.buildGraph(
           executionGraph,
           jobGraph,
@@ -1285,7 +1282,6 @@ class JobManager(
           jobMetrics,
           numSlots,
           blobServer,
-          Time.milliseconds(allocationTimeout),
           log.logger)
         
         if (registerNewGraph) {
@@ -2054,7 +2050,7 @@ object JobManager {
     }
 
     try {
-      metricRegistry.shutdown().get()
+      metricRegistry.shutdown()
     } catch {
       case t: Throwable =>
         LOG.warn("Could not properly shut down the metric registry.", t)
@@ -2430,8 +2426,9 @@ object JobManager {
     val timeout: FiniteDuration = AkkaUtils.getTimeout(configuration)
 
     val classLoaderResolveOrder = configuration.getString(CoreOptions.CLASSLOADER_RESOLVE_ORDER)
-
-    val alwaysParentFirstLoaderPatterns = CoreOptions.getParentFirstLoaderPatterns(configuration)
+    val alwaysParentFirstLoaderString =
+      configuration.getString(CoreOptions.ALWAYS_PARENT_FIRST_LOADER)
+    val alwaysParentFirstLoaderPatterns = alwaysParentFirstLoaderString.split(';')
 
     val restartStrategy = RestartStrategyFactory.createRestartStrategyFactory(configuration)
 

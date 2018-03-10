@@ -314,12 +314,12 @@ angular.module('flinkApp')
 
   @cancelJob = (jobid) ->
     # uses the non REST-compliant GET yarn-cancel handler which is available in addition to the
-    # proper $http.patch flinkConfig.jobServer + "jobs/" + jobid + "?mode=cancel"
+    # proper "DELETE jobs/<jobid>/"
     $http.get flinkConfig.jobServer + "jobs/" + jobid + "/yarn-cancel"
 
   @stopJob = (jobid) ->
     # uses the non REST-compliant GET yarn-cancel handler which is available in addition to the
-    # proper $http.patch flinkConfig.jobServer + "jobs/" + jobid + "?mode=stop"
+    # proper "DELETE jobs/<jobid>/"
     $http.get "jobs/" + jobid + "/yarn-stop"
 
   @

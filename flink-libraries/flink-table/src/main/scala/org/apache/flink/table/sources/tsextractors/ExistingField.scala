@@ -27,7 +27,7 @@ import org.apache.flink.table.expressions.{Cast, Expression, ResolvedFieldRefere
   *
   * @param field The field to convert into a rowtime attribute.
   */
-class ExistingField(val field: String) extends TimestampExtractor {
+class ExistingField(field: String) extends TimestampExtractor {
 
   override def getArgumentFields: Array[String] = Array(field)
 
@@ -65,12 +65,4 @@ class ExistingField(val field: String) extends TimestampExtractor {
     }
   }
 
-  override def equals(other: Any): Boolean = other match {
-    case that: ExistingField => field == that.field
-    case _ => false
-  }
-
-  override def hashCode(): Int = {
-    field.hashCode
-  }
 }

@@ -45,7 +45,7 @@ public final class BlobServerPortHandler extends AbstractRestHandler<DispatcherG
 
 	public BlobServerPortHandler(
 			CompletableFuture<String> localRestAddress,
-			GatewayRetriever<? extends DispatcherGateway> leaderRetriever,
+			GatewayRetriever<DispatcherGateway> leaderRetriever,
 			Time timeout,
 			Map<String, String> headers) {
 		super(localRestAddress, leaderRetriever, timeout, headers, BlobServerPortHeaders.getInstance());

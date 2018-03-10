@@ -86,59 +86,49 @@ public class SecurityOptions {
 	 */
 	public static final ConfigOption<Boolean> SSL_ENABLED =
 		key("security.ssl.enabled")
-			.defaultValue(false)
-			.withDescription("Turns on SSL for internal network communication. This can be optionally overridden by" +
-				" flags defined in different transport modules.");
+			.defaultValue(false);
 
 	/**
 	 * The Java keystore file containing the flink endpoint key and certificate.
 	 */
 	public static final ConfigOption<String> SSL_KEYSTORE =
 		key("security.ssl.keystore")
-			.noDefaultValue()
-			.withDescription("The Java keystore file to be used by the flink endpoint for its SSL Key and Certificate.");
+			.noDefaultValue();
 
 	/**
 	 * Secret to decrypt the keystore file.
 	 */
 	public static final ConfigOption<String> SSL_KEYSTORE_PASSWORD =
 		key("security.ssl.keystore-password")
-			.noDefaultValue()
-			.withDescription("The secret to decrypt the keystore file.");
+			.noDefaultValue();
 
 	/**
 	 * Secret to decrypt the server key.
 	 */
 	public static final ConfigOption<String> SSL_KEY_PASSWORD =
 		key("security.ssl.key-password")
-			.noDefaultValue()
-			.withDescription("The secret to decrypt the server key in the keystore.");
+			.noDefaultValue();
 
 	/**
 	 * The truststore file containing the public CA certificates to verify the ssl peers.
 	 */
 	public static final ConfigOption<String> SSL_TRUSTSTORE =
 		key("security.ssl.truststore")
-			.noDefaultValue()
-			.withDescription("The truststore file containing the public CA certificates to be used by flink endpoints" +
-				" to verify the peer’s certificate.");
+			.noDefaultValue();
 
 	/**
 	 * Secret to decrypt the truststore.
 	 */
 	public static final ConfigOption<String> SSL_TRUSTSTORE_PASSWORD =
 		key("security.ssl.truststore-password")
-			.noDefaultValue()
-			.withDescription("The secret to decrypt the truststore.");
+			.noDefaultValue();
 
 	/**
 	 * SSL protocol version to be supported.
 	 */
 	public static final ConfigOption<String> SSL_PROTOCOL =
 		key("security.ssl.protocol")
-			.defaultValue("TLSv1.2")
-			.withDescription("The SSL protocol version to be supported for the ssl transport. Note that it doesn’t" +
-				" support comma separated list.");
+			.defaultValue("TLSv1.2");
 
 	/**
 	 * The standard SSL algorithms to be supported.
@@ -147,15 +137,12 @@ public class SecurityOptions {
 	 */
 	public static final ConfigOption<String> SSL_ALGORITHMS =
 		key("security.ssl.algorithms")
-			.defaultValue("TLS_RSA_WITH_AES_128_CBC_SHA")
-			.withDescription("The comma separated list of standard SSL algorithms to be supported. Read more" +
-				" <a href=\"http://docs.oracle.com/javase/8/docs/technotes/guides/security/StandardNames.html#ciphersuites\">here</a>.");
+			.defaultValue("TLS_RSA_WITH_AES_128_CBC_SHA");
 
 	/**
 	 * Flag to enable/disable hostname verification for the ssl connections.
 	 */
 	public static final ConfigOption<Boolean> SSL_VERIFY_HOSTNAME =
 		key("security.ssl.verify-hostname")
-			.defaultValue(true)
-			.withDescription("Flag to enable peer’s hostname verification during ssl handshake.");
+			.defaultValue(true);
 }

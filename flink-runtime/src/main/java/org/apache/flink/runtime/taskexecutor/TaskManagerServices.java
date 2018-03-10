@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.taskexecutor;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.core.memory.MemoryType;
@@ -35,7 +34,6 @@ import org.apache.flink.runtime.io.network.LocalConnectionManager;
 import org.apache.flink.runtime.io.network.NetworkEnvironment;
 import org.apache.flink.runtime.io.network.TaskEventDispatcher;
 import org.apache.flink.runtime.io.network.buffer.NetworkBufferPool;
-import org.apache.flink.runtime.io.network.netty.NettyConfig;
 import org.apache.flink.runtime.io.network.netty.NettyConnectionManager;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionManager;
 import org.apache.flink.runtime.memory.MemoryManager;
@@ -43,14 +41,12 @@ import org.apache.flink.runtime.query.KvStateClientProxy;
 import org.apache.flink.runtime.query.KvStateRegistry;
 import org.apache.flink.runtime.query.KvStateServer;
 import org.apache.flink.runtime.query.QueryableStateUtils;
-import org.apache.flink.runtime.state.LocalRecoveryConfig;
 import org.apache.flink.runtime.state.TaskExecutorLocalStateStoresManager;
 import org.apache.flink.runtime.taskexecutor.slot.TaskSlotTable;
 import org.apache.flink.runtime.taskexecutor.slot.TimerService;
 import org.apache.flink.runtime.taskmanager.NetworkEnvironmentConfiguration;
 import org.apache.flink.runtime.taskmanager.TaskManagerLocation;
-import org.apache.flink.util.ExceptionUtils;
-import org.apache.flink.util.FlinkException;
+import org.apache.flink.runtime.util.EnvironmentInformation;
 import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
@@ -60,19 +56,14 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /**
  * Container for {@link TaskExecutor} services such as the {@link MemoryManager}, {@link IOManager},
- * {@link NetworkEnvironment}. All services are exclusive to a single {@link TaskExecutor}.
- * Consequently, the respective {@link TaskExecutor} is responsible for closing them.
+ * {@link NetworkEnvironment}.
  */
 public class TaskManagerServices {
 	private static final Logger LOG = LoggerFactory.getLogger(TaskManagerServices.class);
-
-	@VisibleForTesting
-	public static final String LOCAL_STATE_SUB_DIRECTORY_ROOT = "localState";
 
 	/** TaskManager services. */
 	private final TaskManagerLocation taskManagerLocation;
@@ -84,9 +75,9 @@ public class TaskManagerServices {
 	private final TaskSlotTable taskSlotTable;
 	private final JobManagerTable jobManagerTable;
 	private final JobLeaderService jobLeaderService;
-	private final TaskExecutorLocalStateStoresManager taskManagerStateStore;
+	private final TaskExecutorLocalStateStoresManager taskStateManager;
 
-	TaskManagerServices(
+	private TaskManagerServices(
 		TaskManagerLocation taskManagerLocation,
 		MemoryManager memoryManager,
 		IOManager ioManager,
@@ -96,7 +87,7 @@ public class TaskManagerServices {
 		TaskSlotTable taskSlotTable,
 		JobManagerTable jobManagerTable,
 		JobLeaderService jobLeaderService,
-		TaskExecutorLocalStateStoresManager taskManagerStateStore) {
+		TaskExecutorLocalStateStoresManager taskStateManager) {
 
 		this.taskManagerLocation = Preconditions.checkNotNull(taskManagerLocation);
 		this.memoryManager = Preconditions.checkNotNull(memoryManager);
@@ -107,7 +98,7 @@ public class TaskManagerServices {
 		this.taskSlotTable = Preconditions.checkNotNull(taskSlotTable);
 		this.jobManagerTable = Preconditions.checkNotNull(jobManagerTable);
 		this.jobLeaderService = Preconditions.checkNotNull(jobLeaderService);
-		this.taskManagerStateStore = Preconditions.checkNotNull(taskManagerStateStore);
+		this.taskStateManager = Preconditions.checkNotNull(taskStateManager);
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -150,66 +141,8 @@ public class TaskManagerServices {
 		return jobLeaderService;
 	}
 
-	public TaskExecutorLocalStateStoresManager getTaskManagerStateStore() {
-		return taskManagerStateStore;
-	}
-
-	// --------------------------------------------------------------------------------------------
-	//  Shut down method
-	// --------------------------------------------------------------------------------------------
-
-	/**
-	 * Shuts the {@link TaskExecutor} services down.
-	 */
-	public void shutDown() throws FlinkException {
-
-		Exception exception = null;
-
-		try {
-			taskManagerStateStore.shutdown();
-		} catch (Exception e) {
-			exception = e;
-		}
-
-		try {
-			memoryManager.shutdown();
-		} catch (Exception e) {
-			exception = ExceptionUtils.firstOrSuppressed(e, exception);
-		}
-
-		try {
-			ioManager.shutdown();
-		} catch (Exception e) {
-			exception = ExceptionUtils.firstOrSuppressed(e, exception);
-		}
-
-		try {
-			networkEnvironment.shutdown();
-		} catch (Exception e) {
-			exception = ExceptionUtils.firstOrSuppressed(e, exception);
-		}
-
-		try {
-			fileCache.shutdown();
-		} catch (Exception e) {
-			exception = ExceptionUtils.firstOrSuppressed(e, exception);
-		}
-
-		try {
-			taskSlotTable.stop();
-		} catch (Exception e) {
-			exception = ExceptionUtils.firstOrSuppressed(e, exception);
-		}
-
-		try {
-			jobLeaderService.stop();
-		} catch (Exception e) {
-			exception = ExceptionUtils.firstOrSuppressed(e, exception);
-		}
-
-		if (exception != null) {
-			throw new FlinkException("Could not properly shut down the TaskManager services.", exception);
-		}
+	public TaskExecutorLocalStateStoresManager getTaskStateManager() {
+		return taskStateManager;
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -221,23 +154,17 @@ public class TaskManagerServices {
 	 *
 	 * @param resourceID resource ID of the task manager
 	 * @param taskManagerServicesConfiguration task manager configuration
-	 * @param taskIOExecutor executor for async IO operations.
-	 * @param freeHeapMemoryWithDefrag an estimate of the size of the free heap memory
-	 * @param maxJvmHeapMemory the maximum JVM heap size
 	 * @return task manager components
 	 * @throws Exception
 	 */
 	public static TaskManagerServices fromConfiguration(
 			TaskManagerServicesConfiguration taskManagerServicesConfiguration,
-			ResourceID resourceID,
-			Executor taskIOExecutor,
-			long freeHeapMemoryWithDefrag,
-			long maxJvmHeapMemory) throws Exception {
+			ResourceID resourceID) throws Exception {
 
 		// pre-start checks
 		checkTempDirs(taskManagerServicesConfiguration.getTmpDirPaths());
 
-		final NetworkEnvironment network = createNetworkEnvironment(taskManagerServicesConfiguration, maxJvmHeapMemory);
+		final NetworkEnvironment network = createNetworkEnvironment(taskManagerServicesConfiguration);
 		network.start();
 
 		final TaskManagerLocation taskManagerLocation = new TaskManagerLocation(
@@ -246,7 +173,7 @@ public class TaskManagerServices {
 			network.getConnectionManager().getDataPort());
 
 		// this call has to happen strictly after the network stack has been initialized
-		final MemoryManager memoryManager = createMemoryManager(taskManagerServicesConfiguration, freeHeapMemoryWithDefrag, maxJvmHeapMemory);
+		final MemoryManager memoryManager = createMemoryManager(taskManagerServicesConfiguration);
 
 		// start the I/O manager, it will create some temp directories.
 		final IOManager ioManager = new IOManagerAsync(taskManagerServicesConfiguration.getTmpDirPaths());
@@ -270,20 +197,7 @@ public class TaskManagerServices {
 		final JobManagerTable jobManagerTable = new JobManagerTable();
 
 		final JobLeaderService jobLeaderService = new JobLeaderService(taskManagerLocation);
-
-		LocalRecoveryConfig.LocalRecoveryMode localRecoveryMode = taskManagerServicesConfiguration.getLocalRecoveryMode();
-
-		final String[] stateRootDirectoryStrings = taskManagerServicesConfiguration.getLocalRecoveryStateRootDirectories();
-
-		final File[] stateRootDirectoryFiles = new File[stateRootDirectoryStrings.length];
-
-		for (int i = 0; i < stateRootDirectoryStrings.length; ++i) {
-			stateRootDirectoryFiles[i] = new File(stateRootDirectoryStrings[i], LOCAL_STATE_SUB_DIRECTORY_ROOT);
-		}
-
-		final TaskExecutorLocalStateStoresManager taskStateManager =
-			new TaskExecutorLocalStateStoresManager(localRecoveryMode, stateRootDirectoryFiles, taskIOExecutor);
-
+		final TaskExecutorLocalStateStoresManager taskStateManager = new TaskExecutorLocalStateStoresManager();
 		return new TaskManagerServices(
 			taskManagerLocation,
 			memoryManager,
@@ -301,15 +215,10 @@ public class TaskManagerServices {
 	 * Creates a {@link MemoryManager} from the given {@link TaskManagerServicesConfiguration}.
 	 *
 	 * @param taskManagerServicesConfiguration to create the memory manager from
-	 * @param freeHeapMemoryWithDefrag an estimate of the size of the free heap memory
-	 * @param maxJvmHeapMemory the maximum JVM heap size
 	 * @return Memory manager
 	 * @throws Exception
 	 */
-	private static MemoryManager createMemoryManager(
-			TaskManagerServicesConfiguration taskManagerServicesConfiguration,
-			long freeHeapMemoryWithDefrag,
-			long maxJvmHeapMemory) throws Exception {
+	private static MemoryManager createMemoryManager(TaskManagerServicesConfiguration taskManagerServicesConfiguration) throws Exception {
 		// computing the amount of memory to use depends on how much memory is available
 		// it strictly needs to happen AFTER the network stack has been initialized
 
@@ -335,7 +244,7 @@ public class TaskManagerServices {
 
 			if (memType == MemoryType.HEAP) {
 				// network buffers allocated off-heap -> use memoryFraction of the available heap:
-				long relativeMemSize = (long) (freeHeapMemoryWithDefrag * memoryFraction);
+				long relativeMemSize = (long) (EnvironmentInformation.getSizeOfFreeHeapMemoryWithDefrag() * memoryFraction);
 				if (preAllocateMemory) {
 					LOG.info("Using {} of the currently free heap space for managed heap memory ({} MB)." ,
 						memoryFraction , relativeMemSize >> 20);
@@ -349,7 +258,8 @@ public class TaskManagerServices {
 				// calculateHeapSizeMB(long totalJavaMemorySizeMB, Configuration config)), i.e.
 				// maxJvmHeap = jvmTotalNoNet - jvmTotalNoNet * memoryFraction = jvmTotalNoNet * (1 - memoryFraction)
 				// directMemorySize = jvmTotalNoNet * memoryFraction
-				long directMemorySize = (long) (maxJvmHeapMemory / (1.0 - memoryFraction) * memoryFraction);
+				long maxJvmHeap = EnvironmentInformation.getMaxJvmHeapMemory();
+				long directMemorySize = (long) (maxJvmHeap / (1.0 - memoryFraction) * memoryFraction);
 				if (preAllocateMemory) {
 					LOG.info("Using {} of the maximum memory size for managed off-heap memory ({} MB)." ,
 						memoryFraction, directMemorySize >> 20);
@@ -391,17 +301,15 @@ public class TaskManagerServices {
 	 * Creates the {@link NetworkEnvironment} from the given {@link TaskManagerServicesConfiguration}.
 	 *
 	 * @param taskManagerServicesConfiguration to construct the network environment from
-	 * @param maxJvmHeapMemory the maximum JVM heap size
 	 * @return Network environment
 	 * @throws IOException
 	 */
 	private static NetworkEnvironment createNetworkEnvironment(
-			TaskManagerServicesConfiguration taskManagerServicesConfiguration,
-			long maxJvmHeapMemory) {
+			TaskManagerServicesConfiguration taskManagerServicesConfiguration) throws IOException {
 
 		NetworkEnvironmentConfiguration networkEnvironmentConfiguration = taskManagerServicesConfiguration.getNetworkConfig();
 
-		final long networkBuf = calculateNetworkBufferMemory(taskManagerServicesConfiguration, maxJvmHeapMemory);
+		final long networkBuf = calculateNetworkBufferMemory(taskManagerServicesConfiguration);
 		int segmentSize = networkEnvironmentConfiguration.networkBufferSize();
 
 		// tolerate offcuts between intended and allocated memory due to segmentation (will be available to the user-space memory)
@@ -416,11 +324,9 @@ public class TaskManagerServices {
 			segmentSize);
 
 		ConnectionManager connectionManager;
-		boolean enableCreditBased = false;
-		NettyConfig nettyConfig = networkEnvironmentConfiguration.nettyConfig();
-		if (nettyConfig != null) {
-			connectionManager = new NettyConnectionManager(nettyConfig);
-			enableCreditBased = nettyConfig.isCreditBasedEnabled();
+
+		if (networkEnvironmentConfiguration.nettyConfig() != null) {
+			connectionManager = new NettyConnectionManager(networkEnvironmentConfiguration.nettyConfig());
 		} else {
 			connectionManager = new LocalConnectionManager();
 		}
@@ -472,8 +378,7 @@ public class TaskManagerServices {
 			networkEnvironmentConfiguration.partitionRequestInitialBackoff(),
 			networkEnvironmentConfiguration.partitionRequestMaxBackoff(),
 			networkEnvironmentConfiguration.networkBuffersPerChannel(),
-			networkEnvironmentConfiguration.floatingNetworkBuffersPerGate(),
-			enableCreditBased);
+			networkEnvironmentConfiguration.floatingNetworkBuffersPerGate());
 	}
 
 	/**
@@ -570,11 +475,10 @@ public class TaskManagerServices {
 	 * </ul>.
 	 *
 	 * @param tmConfig task manager services configuration object
-	 * @param maxJvmHeapMemory the maximum JVM heap size
 	 *
 	 * @return memory to use for network buffers (in bytes)
 	 */
-	public static long calculateNetworkBufferMemory(TaskManagerServicesConfiguration tmConfig, long maxJvmHeapMemory) {
+	public static long calculateNetworkBufferMemory(TaskManagerServicesConfiguration tmConfig) {
 		final NetworkEnvironmentConfiguration networkConfig = tmConfig.getNetworkConfig();
 
 		final float networkBufFraction = networkConfig.networkBufFraction();
@@ -594,9 +498,11 @@ public class TaskManagerServices {
 
 		final MemoryType memType = tmConfig.getMemoryType();
 
+		final long maxMemory = EnvironmentInformation.getMaxJvmHeapMemory();
+
 		final long jvmHeapNoNet;
 		if (memType == MemoryType.HEAP) {
-			jvmHeapNoNet = maxJvmHeapMemory;
+			jvmHeapNoNet = maxMemory;
 		} else if (memType == MemoryType.OFF_HEAP) {
 
 			// check if a value has been configured
@@ -606,13 +512,13 @@ public class TaskManagerServices {
 				// The maximum heap memory has been adjusted according to configuredMemory, i.e.
 				// maxJvmHeap = jvmHeapNoNet - configuredMemory
 
-				jvmHeapNoNet = maxJvmHeapMemory + configuredMemory;
+				jvmHeapNoNet = maxMemory + configuredMemory;
 			} else {
 				// The maximum heap memory has been adjusted according to the fraction, i.e.
 				// maxJvmHeap = jvmHeapNoNet - jvmHeapNoNet * managedFraction = jvmHeapNoNet * (1 - managedFraction)
 
 				final float managedFraction = tmConfig.getMemoryFraction();
-				jvmHeapNoNet = (long) (maxJvmHeapMemory / (1.0 - managedFraction));
+				jvmHeapNoNet = (long) (maxMemory / (1.0 - managedFraction));
 			}
 		} else {
 			throw new RuntimeException("No supported memory type detected.");
@@ -625,13 +531,13 @@ public class TaskManagerServices {
 			(long) (jvmHeapNoNet / (1.0 - networkBufFraction) * networkBufFraction)));
 
 		TaskManagerServicesConfiguration
-			.checkConfigParameter(networkBufBytes < maxJvmHeapMemory,
+			.checkConfigParameter(networkBufBytes < maxMemory,
 				"(" + networkBufFraction + ", " + networkBufMin + ", " + networkBufMax + ")",
 				"(" + TaskManagerOptions.NETWORK_BUFFERS_MEMORY_FRACTION.key() + ", " +
 					TaskManagerOptions.NETWORK_BUFFERS_MEMORY_MIN.key() + ", " +
 					TaskManagerOptions.NETWORK_BUFFERS_MEMORY_MAX.key() + ")",
 				"Network buffer memory size too large: " + networkBufBytes + " >= " +
-					maxJvmHeapMemory + "(maximum JVM heap size)");
+					maxMemory + "(maximum JVM heap size)");
 
 		return networkBufBytes;
 	}

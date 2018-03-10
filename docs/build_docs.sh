@@ -17,9 +17,6 @@
 # limitations under the License.
 ################################################################################
 
-RUBY=${RUBY:-ruby}
-GEM=${GEM:-gem}
-
 set -e
 cd "$(dirname ${BASH_SOURCE[0]})"
 
@@ -31,12 +28,12 @@ if [ "`command -v bundle`" == "" ]; then
     echo "Attempting to install locally. If this doesn't work, please install with 'gem install bundler'."
 
     # Adjust the PATH to discover the locally installed Ruby gem
-    if which ${RUBY} >/dev/null && which gem >/dev/null; then
-        export PATH="$(${RUBY} -rubygems -e 'puts Gem.user_dir')/bin:$PATH"
+    if which ruby >/dev/null && which gem >/dev/null; then
+        export PATH="$(ruby -rubygems -e 'puts Gem.user_dir')/bin:$PATH"
     fi
 
     # install bundler locally
-    ${GEM} install --user-install bundler
+    gem install --user-install bundler
 fi
 
 # Install Ruby dependencies locally
@@ -56,7 +53,8 @@ while getopts "pi" opt; do
 		JEKYLL_CMD="serve --baseurl= --watch"
 		;;
 		i)
-		[[ `${RUBY} -v` =~ 'ruby 1' ]] && echo "Error: building the docs with the incremental option requires at least ruby 2.0" && exit 1
+		[[ `ruby -v` =~ 'ruby 1' ]] && echo "Error: building the docs with the incremental option requires at least ruby 2.0" && exit 1
+		cd ruby2
 		bundle install --path .rubydeps
 		JEKYLL_CMD="liveserve --baseurl= --watch --incremental"
 		;;

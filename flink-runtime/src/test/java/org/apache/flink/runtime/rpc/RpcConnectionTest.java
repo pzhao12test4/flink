@@ -23,21 +23,17 @@ import akka.actor.ActorSystem;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.akka.AkkaUtils;
-import org.apache.flink.runtime.concurrent.FutureUtils;
 import org.apache.flink.runtime.rpc.akka.AkkaRpcService;
 import org.apache.flink.runtime.rpc.exceptions.RpcConnectionException;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorGateway;
 import org.apache.flink.testutils.category.Flip6;
-import org.apache.flink.util.TestLogger;
 
-import akka.actor.Terminated;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 import scala.Option;
 import scala.Tuple2;
 
-import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -50,10 +46,10 @@ import static org.junit.Assert.*;
  * connect to an RpcEndpoint.
  */
 @Category(Flip6.class)
-public class RpcConnectionTest extends TestLogger {
+public class RpcConnectionTest {
 
 	@Test
-	public void testConnectFailure() throws Exception {
+	public void testConnectFailure() {
 		ActorSystem actorSystem = null;
 		RpcService rpcService = null;
 		try {
@@ -81,25 +77,12 @@ public class RpcConnectionTest extends TestLogger {
 			fail("wrong exception: " + t);
 		}
 		finally {
-			final CompletableFuture<Void> rpcTerminationFuture;
-
 			if (rpcService != null) {
-				rpcTerminationFuture = rpcService.stopService();
-			} else {
-				rpcTerminationFuture = CompletableFuture.completedFuture(null);
+				rpcService.stopService();
 			}
-
-			final CompletableFuture<Terminated> actorSystemTerminationFuture;
-
 			if (actorSystem != null) {
-				actorSystemTerminationFuture = FutureUtils.toJava(actorSystem.terminate());
-			} else {
-				actorSystemTerminationFuture = CompletableFuture.completedFuture(null);
+				actorSystem.shutdown();
 			}
-
-			FutureUtils
-				.waitForAll(Arrays.asList(rpcTerminationFuture, actorSystemTerminationFuture))
-				.get();
 		}
 	}
 }

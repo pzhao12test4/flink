@@ -31,7 +31,6 @@ import org.apache.flink.runtime.clusterframework.messages.ResourceRemoved;
 import org.apache.flink.runtime.clusterframework.messages.TriggerRegistrationAtJobManager;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.concurrent.ScheduledExecutor;
-import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.heartbeat.TestingHeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
@@ -42,7 +41,7 @@ import org.apache.flink.runtime.jobmaster.JobMasterGateway;
 import org.apache.flink.runtime.jobmaster.JobMasterId;
 import org.apache.flink.runtime.jobmaster.JobMasterRegistrationSuccess;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
-import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.leaderelection.TestingLeaderRetrievalService;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.messages.JobManagerMessages;
 import org.apache.flink.runtime.metrics.MetricRegistryImpl;
@@ -53,7 +52,6 @@ import org.apache.flink.runtime.resourcemanager.ResourceManagerGateway;
 import org.apache.flink.runtime.resourcemanager.ResourceManagerId;
 import org.apache.flink.runtime.resourcemanager.StandaloneResourceManager;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
-import org.apache.flink.runtime.rpc.RpcUtils;
 import org.apache.flink.runtime.rpc.TestingRpcService;
 import org.apache.flink.runtime.taskexecutor.SlotReport;
 import org.apache.flink.runtime.taskexecutor.TaskExecutorGateway;
@@ -107,7 +105,7 @@ public class ResourceManagerTest extends TestLogger {
 	private final Time timeout = Time.seconds(10L);
 
 	private TestingHighAvailabilityServices highAvailabilityServices;
-	private SettableLeaderRetrievalService jobManagerLeaderRetrievalService;
+	private TestingLeaderRetrievalService jobManagerLeaderRetrievalService;
 
 	@BeforeClass
 	public static void setup() {
@@ -121,7 +119,7 @@ public class ResourceManagerTest extends TestLogger {
 
 	@Before
 	public void setupTest() {
-		jobManagerLeaderRetrievalService = new SettableLeaderRetrievalService();
+		jobManagerLeaderRetrievalService = new TestingLeaderRetrievalService();
 
 		highAvailabilityServices = new TestingHighAvailabilityServices();
 
@@ -530,7 +528,6 @@ public class ResourceManagerTest extends TestLogger {
 				slotManager,
 				metricRegistry,
 				jobLeaderIdService,
-				new ClusterInformation("localhost", 1234),
 				testingFatalErrorHandler);
 
 			resourceManager.start();
@@ -579,7 +576,7 @@ public class ResourceManagerTest extends TestLogger {
 			verify(taskExecutorGateway, Mockito.timeout(timeout.toMilliseconds())).disconnectResourceManager(any(TimeoutException.class));
 
 		} finally {
-			RpcUtils.terminateRpcService(rpcService, timeout);
+			rpcService.stopService();
 		}
 	}
 
@@ -602,7 +599,7 @@ public class ResourceManagerTest extends TestLogger {
 			Time.seconds(5L));
 
 		final TestingLeaderElectionService rmLeaderElectionService = new TestingLeaderElectionService();
-		final SettableLeaderRetrievalService jmLeaderRetrievalService = new SettableLeaderRetrievalService(jobMasterAddress, jobMasterId.toUUID());
+		final TestingLeaderRetrievalService jmLeaderRetrievalService = new TestingLeaderRetrievalService(jobMasterAddress, jobMasterId.toUUID());
 		final TestingHighAvailabilityServices highAvailabilityServices = new TestingHighAvailabilityServices();
 		highAvailabilityServices.setResourceManagerLeaderElectionService(rmLeaderElectionService);
 		highAvailabilityServices.setJobMasterLeaderRetriever(jobId, jmLeaderRetrievalService);
@@ -635,7 +632,6 @@ public class ResourceManagerTest extends TestLogger {
 				slotManager,
 				metricRegistry,
 				jobLeaderIdService,
-				new ClusterInformation("localhost", 1234),
 				testingFatalErrorHandler);
 
 			resourceManager.start();
@@ -681,7 +677,7 @@ public class ResourceManagerTest extends TestLogger {
 			verify(jobMasterGateway, Mockito.timeout(timeout.toMilliseconds())).disconnectResourceManager(eq(rmLeaderId), any(TimeoutException.class));
 
 		} finally {
-			RpcUtils.terminateRpcService(rpcService, timeout);
+			rpcService.stopService();
 		}
 	}
 }

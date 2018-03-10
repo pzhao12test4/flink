@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.io.network.netty;
 
-import org.apache.flink.runtime.io.network.NetworkClientHandler;
 import org.apache.flink.runtime.io.network.TaskEventDispatcher;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionProvider;
 
@@ -39,12 +38,9 @@ public class NettyProtocol {
 	private final ResultPartitionProvider partitionProvider;
 	private final TaskEventDispatcher taskEventDispatcher;
 
-	private final boolean creditBasedEnabled;
-
-	NettyProtocol(ResultPartitionProvider partitionProvider, TaskEventDispatcher taskEventDispatcher, boolean creditBasedEnabled) {
+	NettyProtocol(ResultPartitionProvider partitionProvider, TaskEventDispatcher taskEventDispatcher) {
 		this.partitionProvider = partitionProvider;
 		this.taskEventDispatcher = taskEventDispatcher;
-		this.creditBasedEnabled = creditBasedEnabled;
 	}
 
 	/**
@@ -88,7 +84,7 @@ public class NettyProtocol {
 	public ChannelHandler[] getServerChannelHandlers() {
 		PartitionRequestQueue queueOfPartitionQueues = new PartitionRequestQueue();
 		PartitionRequestServerHandler serverHandler = new PartitionRequestServerHandler(
-			partitionProvider, taskEventDispatcher, queueOfPartitionQueues, creditBasedEnabled);
+			partitionProvider, taskEventDispatcher, queueOfPartitionQueues);
 
 		return new ChannelHandler[] {
 			messageEncoder,
@@ -137,14 +133,11 @@ public class NettyProtocol {
 	 * @return channel handlers
 	 */
 	public ChannelHandler[] getClientChannelHandlers() {
-		NetworkClientHandler networkClientHandler =
-			creditBasedEnabled ? new CreditBasedPartitionRequestClientHandler() :
-				new PartitionRequestClientHandler();
 		return new ChannelHandler[] {
 			messageEncoder,
 			createFrameLengthDecoder(),
 			messageDecoder,
-			networkClientHandler};
+			new PartitionRequestClientHandler()};
 	}
 
 }

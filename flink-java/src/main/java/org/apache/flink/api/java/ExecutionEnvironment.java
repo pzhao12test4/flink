@@ -1093,7 +1093,9 @@ public abstract class ExecutionEnvironment {
 	 * @return A local execution environment with the specified parallelism.
 	 */
 	public static LocalEnvironment createLocalEnvironment(int parallelism) {
-		return createLocalEnvironment(new Configuration(), parallelism);
+		LocalEnvironment lee = new LocalEnvironment();
+		lee.setParallelism(parallelism);
+		return lee;
 	}
 
 	/**
@@ -1105,7 +1107,7 @@ public abstract class ExecutionEnvironment {
 	 * @return A local execution environment with the specified parallelism.
 	 */
 	public static LocalEnvironment createLocalEnvironment(Configuration customConfiguration) {
-		return createLocalEnvironment(customConfiguration, -1);
+		return new LocalEnvironment(customConfiguration);
 	}
 
 	/**
@@ -1125,24 +1127,10 @@ public abstract class ExecutionEnvironment {
 
 		conf.setBoolean(ConfigConstants.LOCAL_START_WEBSERVER, true);
 
-		return createLocalEnvironment(conf, -1);
-	}
+		LocalEnvironment localEnv = new LocalEnvironment(conf);
+		localEnv.setParallelism(defaultLocalDop);
 
-	/**
-	 * Creates a {@link LocalEnvironment} which is used for executing Flink jobs.
-	 *
-	 * @param configuration to start the {@link LocalEnvironment} with
-	 * @param defaultParallelism to initialize the {@link LocalEnvironment} with
-	 * @return {@link LocalEnvironment}
-	 */
-	private static LocalEnvironment createLocalEnvironment(Configuration configuration, int defaultParallelism) {
-		final LocalEnvironment localEnvironment = new LocalEnvironment(configuration);
-
-		if (defaultParallelism > 0) {
-			localEnvironment.setParallelism(defaultParallelism);
-		}
-
-		return localEnvironment;
+		return localEnv;
 	}
 
 	/**

@@ -110,8 +110,7 @@ class DataSetAggregate(
         input.getRowType,
         inputDS.getType.asInstanceOf[RowTypeInfo].getFieldTypes,
         rowRelDataType,
-        grouping,
-        tableEnv.getConfig)
+        grouping)
 
     val aggString = aggregationToString(inputType, grouping, getRowType, namedAggregates, Nil)
 

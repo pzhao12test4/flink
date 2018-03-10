@@ -58,7 +58,7 @@ object ExternalTableSourceUtil extends Logging {
     }
     // use the factory approach
     else {
-      val source = TableSourceFactoryService.findAndCreateTableSource(externalCatalogTable)
+      val source = TableSourceFactoryService.findTableSourceFactory(externalCatalogTable)
       tableEnv match {
         // check for a batch table source in this batch environment
         case _: BatchTableEnvironment =>

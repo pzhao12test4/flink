@@ -84,7 +84,7 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 
 	// null if gateway; otherwise non-null
 	@Nullable
-	private final CompletableFuture<Void> terminationFuture;
+	private final CompletableFuture<Boolean> terminationFuture;
 
 	AkkaInvocationHandler(
 			String address,
@@ -92,7 +92,7 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 			ActorRef rpcEndpoint,
 			Time timeout,
 			long maximumFramesize,
-			@Nullable CompletableFuture<Void> terminationFuture) {
+			@Nullable CompletableFuture<Boolean> terminationFuture) {
 
 		this.address = Preconditions.checkNotNull(address);
 		this.hostname = Preconditions.checkNotNull(hostname);
@@ -341,7 +341,7 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 	}
 
 	@Override
-	public CompletableFuture<Void> getTerminationFuture() {
+	public CompletableFuture<Boolean> getTerminationFuture() {
 		return terminationFuture;
 	}
 }

@@ -18,6 +18,7 @@
 
 package org.apache.flink.runtime.checkpoint;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.time.Time;
@@ -36,10 +37,10 @@ import org.apache.flink.runtime.messages.checkpoint.AcknowledgeCheckpoint;
 import org.apache.flink.runtime.messages.checkpoint.DeclineCheckpoint;
 import org.apache.flink.runtime.state.CheckpointStorage;
 import org.apache.flink.runtime.state.CheckpointStorageLocation;
-import org.apache.flink.runtime.state.CompletedCheckpointStorageLocation;
 import org.apache.flink.runtime.state.SharedStateRegistry;
 import org.apache.flink.runtime.state.SharedStateRegistryFactory;
 import org.apache.flink.runtime.state.StateBackend;
+import org.apache.flink.runtime.state.StreamStateHandle;
 import org.apache.flink.runtime.taskmanager.DispatcherThreadFactory;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.StringUtils;
@@ -98,7 +99,7 @@ public class CheckpointCoordinator {
 
 	/** The executor used for asynchronous calls, like potentially blocking I/O */
 	private final Executor executor;
-
+	
 	/** Tasks who need to be sent a message when a checkpoint is started */
 	private final ExecutionVertex[] tasksToTrigger;
 
@@ -341,7 +342,7 @@ public class CheckpointCoordinator {
 	}
 
 	// --------------------------------------------------------------------------------------------
-	//  Triggering Checkpoints and Savepoints
+	//  Handling checkpoints and messages
 	// --------------------------------------------------------------------------------------------
 
 	/**
@@ -354,10 +355,11 @@ public class CheckpointCoordinator {
 	 * @throws IllegalStateException If no savepoint directory has been
 	 *                               specified and no default savepoint directory has been
 	 *                               configured
+	 * @throws Exception             Failures during triggering are forwarded
 	 */
 	public CompletableFuture<CompletedCheckpoint> triggerSavepoint(
 			long timestamp,
-			@Nullable String targetLocation) {
+			@Nullable String targetLocation) throws Exception {
 
 		CheckpointProperties props = CheckpointProperties.forSavepoint();
 
@@ -370,7 +372,7 @@ public class CheckpointCoordinator {
 		if (triggerResult.isSuccess()) {
 			return triggerResult.getPendingCheckpoint().getCompletionFuture();
 		} else {
-			Throwable cause = new CheckpointTriggerException("Failed to trigger savepoint.", triggerResult.getFailureReason());
+			Throwable cause = new Exception("Failed to trigger savepoint: " + triggerResult.getFailureReason().message());
 			return FutureUtils.completedExceptionally(cause);
 		}
 	}
@@ -389,8 +391,38 @@ public class CheckpointCoordinator {
 		return triggerCheckpoint(timestamp, checkpointProperties, null, isPeriodic).isSuccess();
 	}
 
+	/**
+	 * Test method to trigger a checkpoint/savepoint.
+	 *
+	 * @param timestamp The timestamp for the checkpoint.
+	 * @param options The checkpoint options.
+	 * @return A future to the completed checkpoint
+	 */
 	@VisibleForTesting
-	public CheckpointTriggerResult triggerCheckpoint(
+	@Internal
+	public CompletableFuture<CompletedCheckpoint> triggerCheckpoint(long timestamp, CheckpointOptions options) throws Exception {
+		switch (options.getCheckpointType()) {
+			case SAVEPOINT:
+				return triggerSavepoint(timestamp, options.getTargetLocation());
+
+			case CHECKPOINT:
+				CheckpointTriggerResult triggerResult =
+					triggerCheckpoint(timestamp, checkpointProperties, null, false);
+
+				if (triggerResult.isSuccess()) {
+					return triggerResult.getPendingCheckpoint().getCompletionFuture();
+				} else {
+					Throwable cause = new Exception("Failed to trigger checkpoint: " + triggerResult.getFailureReason().message());
+					return FutureUtils.completedExceptionally(cause);
+				}
+
+			default:
+				throw new IllegalArgumentException("Unknown checkpoint type: " + options.getCheckpointType());
+		}
+	}
+
+	@VisibleForTesting
+	CheckpointTriggerResult triggerCheckpoint(
 			long timestamp,
 			CheckpointProperties props,
 			@Nullable String externalSavepointLocation,
@@ -601,9 +633,12 @@ public class CheckpointCoordinator {
 				}
 				// end of lock scope
 
-				final CheckpointOptions checkpointOptions = new CheckpointOptions(
-						props.getCheckpointType(),
-						checkpointStorageLocation.getLocationReference());
+				CheckpointOptions checkpointOptions;
+				if (!props.isSavepoint()) {
+					checkpointOptions = CheckpointOptions.forCheckpoint();
+				} else {
+					checkpointOptions = CheckpointOptions.forSavepoint(checkpointStorageLocation.getLocationAsPointer());
+				}
 
 				// send the messages to the tasks that trigger their checkpoint
 				for (Execution execution: executions) {
@@ -639,10 +674,6 @@ public class CheckpointCoordinator {
 
 		} // end trigger lock
 	}
-
-	// --------------------------------------------------------------------------------------------
-	//  Handling checkpoints and messages
-	// --------------------------------------------------------------------------------------------
 
 	/**
 	 * Receives a {@link DeclineCheckpoint} message for a pending checkpoint.
@@ -965,7 +996,7 @@ public class CheckpointCoordinator {
 	 * Restores the latest checkpointed state.
 	 *
 	 * @param tasks Map of job vertices to restore. State for these vertices is
-	 * restored via {@link Execution#setInitialState(JobManagerTaskRestore)}.
+	 * restored via {@link Execution#setInitialState(TaskStateSnapshot)}.
 	 * @param errorIfNoCheckpoint Fail if no completed checkpoint is available to
 	 * restore from.
 	 * @param allowNonRestoredState Allow checkpoint state that cannot be mapped
@@ -1064,7 +1095,7 @@ public class CheckpointCoordinator {
 	 *                         mapped to any job vertex in tasks.
 	 * @param tasks            Map of job vertices to restore. State for these
 	 *                         vertices is restored via
-	 *                         {@link Execution#setInitialState(JobManagerTaskRestore)}.
+	 *                         {@link Execution#setInitialState(TaskStateSnapshot)}.
 	 * @param userClassLoader  The class loader to resolve serialized classes in
 	 *                         legacy savepoint versions.
 	 */
@@ -1079,11 +1110,11 @@ public class CheckpointCoordinator {
 		LOG.info("Starting job from savepoint {} ({})",
 				savepointPointer, (allowNonRestored ? "allowing non restored state" : ""));
 
-		final CompletedCheckpointStorageLocation checkpointLocation = checkpointStorage.resolveCheckpoint(savepointPointer);
+		final StreamStateHandle metadataHandle = checkpointStorage.resolveCheckpoint(savepointPointer);
 
 		// Load the savepoint as a checkpoint into the system
 		CompletedCheckpoint savepoint = Checkpoints.loadAndValidateCheckpoint(
-				job, tasks, checkpointLocation, userClassLoader, allowNonRestored);
+				job, tasks, savepointPointer, metadataHandle, userClassLoader, allowNonRestored);
 
 		completedCheckpointStore.addCheckpoint(savepoint);
 

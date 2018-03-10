@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.dispatcher;
 
-import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.BlobServerOptions;
@@ -36,13 +35,14 @@ import org.apache.flink.runtime.highavailability.TestingHighAvailabilityServices
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobStatus;
 import org.apache.flink.runtime.jobgraph.JobVertex;
+import org.apache.flink.runtime.jobmanager.OnCompletionActions;
 import org.apache.flink.runtime.jobmanager.SubmittedJobGraph;
 import org.apache.flink.runtime.jobmanager.SubmittedJobGraphStore;
 import org.apache.flink.runtime.jobmaster.JobManagerRunner;
-import org.apache.flink.runtime.jobmaster.JobManagerSharedServices;
+import org.apache.flink.runtime.jobmaster.JobManagerServices;
 import org.apache.flink.runtime.jobmaster.JobResult;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
-import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.leaderelection.TestingLeaderRetrievalService;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.messages.FlinkJobNotFoundException;
 import org.apache.flink.runtime.metrics.MetricRegistry;
@@ -70,8 +70,6 @@ import org.junit.experimental.categories.Category;
 import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestName;
 import org.mockito.Mockito;
-
-import javax.annotation.Nullable;
 
 import java.util.Collection;
 import java.util.UUID;
@@ -129,14 +127,14 @@ public class DispatcherTest extends TestLogger {
 	private TestingDispatcher dispatcher;
 
 	@BeforeClass
-	public static void setupClass() {
+	public static void setup() {
 		rpcService = new TestingRpcService();
 	}
 
 	@AfterClass
-	public static void teardownClass() throws Exception {
+	public static void teardown() {
 		if (rpcService != null) {
-			RpcUtils.terminateRpcService(rpcService, TIMEOUT);
+			rpcService.stopService();
 
 			rpcService = null;
 		}
@@ -161,7 +159,7 @@ public class DispatcherTest extends TestLogger {
 		haServices.setSubmittedJobGraphStore(submittedJobGraphStore);
 		haServices.setJobMasterLeaderElectionService(TEST_JOB_ID, jobMasterLeaderElectionService);
 		haServices.setCheckpointRecoveryFactory(new StandaloneCheckpointRecoveryFactory());
-		haServices.setResourceManagerLeaderRetriever(new SettableLeaderRetrievalService());
+		haServices.setResourceManagerLeaderRetriever(new TestingLeaderRetrievalService());
 		runningJobsRegistry = haServices.getRunningJobsRegistry();
 
 		final Configuration blobServerConfig = new Configuration();
@@ -274,7 +272,10 @@ public class DispatcherTest extends TestLogger {
 
 		final DispatcherGateway dispatcherGateway = dispatcher.getSelfGateway(DispatcherGateway.class);
 
+		OnCompletionActions onCompletionActions;
+
 		final JobID failedJobId = new JobID();
+		onCompletionActions = dispatcher.new DispatcherOnCompleteActions(failedJobId);
 
 		final JobStatus expectedState = JobStatus.FAILED;
 		final ArchivedExecutionGraph failedExecutionGraph = new ArchivedExecutionGraphBuilder()
@@ -283,7 +284,7 @@ public class DispatcherTest extends TestLogger {
 			.setFailureCause(new ErrorInfo(new RuntimeException("expected"), 1L))
 			.build();
 
-		dispatcher.completeJobExecution(failedExecutionGraph);
+		onCompletionActions.jobReachedGloballyTerminalState(failedExecutionGraph);
 
 		assertThat(
 			dispatcherGateway.requestJobStatus(failedJobId, TIMEOUT).get(),
@@ -344,6 +345,8 @@ public class DispatcherTest extends TestLogger {
 
 	private static class TestingDispatcher extends Dispatcher {
 
+		private final JobID expectedJobId;
+
 		private final CountDownLatch submitJobLatch = new CountDownLatch(2);
 
 		/**
@@ -369,15 +372,34 @@ public class DispatcherTest extends TestLogger {
 				endpointId,
 				configuration,
 				highAvailabilityServices,
-				highAvailabilityServices.getSubmittedJobGraphStore(),
 				resourceManagerGateway,
 				blobServer,
 				heartbeatServices,
 				metricRegistry,
 				archivedExecutionGraphStore,
-				new ExpectedJobIdJobManagerRunnerFactory(expectedJobId),
 				fatalErrorHandler,
 				null);
+
+			this.expectedJobId = expectedJobId;
+		}
+
+		@Override
+		protected JobManagerRunner createJobManagerRunner(
+				ResourceID resourceId,
+				JobGraph jobGraph,
+				Configuration configuration,
+				RpcService rpcService,
+				HighAvailabilityServices highAvailabilityServices,
+				HeartbeatServices heartbeatServices,
+				JobManagerServices jobManagerServices,
+				MetricRegistry metricRegistry,
+				OnCompletionActions onCompleteActions,
+				FatalErrorHandler fatalErrorHandler) throws Exception {
+			assertEquals(expectedJobId, jobGraph.getJobID());
+
+			return new JobManagerRunner(resourceId, jobGraph, configuration, rpcService,
+				highAvailabilityServices, heartbeatServices, jobManagerServices, metricRegistry,
+				onCompleteActions, fatalErrorHandler, null);
 		}
 
 		@Override
@@ -394,48 +416,6 @@ public class DispatcherTest extends TestLogger {
 			if (recoverJobsEnabled.get()) {
 				super.recoverJobs();
 			}
-		}
-
-		@VisibleForTesting
-		void completeJobExecution(ArchivedExecutionGraph archivedExecutionGraph) {
-			runAsync(
-				() -> jobReachedGloballyTerminalState(archivedExecutionGraph));
-		}
-	}
-
-	private static final class ExpectedJobIdJobManagerRunnerFactory implements Dispatcher.JobManagerRunnerFactory {
-
-		private final JobID expectedJobId;
-
-		private ExpectedJobIdJobManagerRunnerFactory(JobID expectedJobId) {
-			this.expectedJobId = expectedJobId;
-		}
-
-		@Override
-		public JobManagerRunner createJobManagerRunner(
-				ResourceID resourceId,
-				JobGraph jobGraph,
-				Configuration configuration,
-				RpcService rpcService,
-				HighAvailabilityServices highAvailabilityServices,
-				HeartbeatServices heartbeatServices,
-				BlobServer blobServer,
-				JobManagerSharedServices jobManagerSharedServices,
-				MetricRegistry metricRegistry,
-				@Nullable String restAddress) throws Exception {
-			assertEquals(expectedJobId, jobGraph.getJobID());
-
-			return Dispatcher.DefaultJobManagerRunnerFactory.INSTANCE.createJobManagerRunner(
-				resourceId,
-				jobGraph,
-				configuration,
-				rpcService,
-				highAvailabilityServices,
-				heartbeatServices,
-				blobServer,
-				jobManagerSharedServices,
-				metricRegistry,
-				restAddress);
 		}
 	}
 }

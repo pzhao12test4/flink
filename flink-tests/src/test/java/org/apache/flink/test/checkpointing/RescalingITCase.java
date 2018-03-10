@@ -139,7 +139,6 @@ public class RescalingITCase extends TestLogger {
 	public static void shutDownExistingCluster() {
 		if (cluster != null) {
 			cluster.stop();
-			cluster = null;
 		}
 	}
 
@@ -550,6 +549,7 @@ public class RescalingITCase extends TestLogger {
 				if (savepointResponse instanceof JobManagerMessages.TriggerSavepointSuccess) {
 					break;
 				}
+				System.out.println(savepointResponse);
 			}
 
 			assertTrue(savepointResponse instanceof JobManagerMessages.TriggerSavepointSuccess);

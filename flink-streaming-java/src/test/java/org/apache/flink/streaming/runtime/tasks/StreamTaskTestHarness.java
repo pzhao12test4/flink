@@ -141,7 +141,7 @@ public class StreamTaskTestHarness<OUT> {
 
 	public void setTaskStateSnapshot(long checkpointId, TaskStateSnapshot taskStateSnapshot) {
 		taskStateManager.setReportedCheckpointId(checkpointId);
-		taskStateManager.setJobManagerTaskStateSnapshotsByCheckpointId(
+		taskStateManager.setTaskStateSnapshotsByCheckpointId(
 			Collections.singletonMap(checkpointId, taskStateSnapshot));
 	}
 
@@ -214,11 +214,10 @@ public class StreamTaskTestHarness<OUT> {
 	 */
 	public void invoke(StreamMockEnvironment mockEnv) throws Exception {
 		this.mockEnv = checkNotNull(mockEnv);
+		this.task = taskFactory.apply(mockEnv);
 
 		initializeInputs();
 		initializeOutput();
-
-		this.task = taskFactory.apply(mockEnv);
 
 		taskThread = new TaskThread(task);
 		taskThread.start();

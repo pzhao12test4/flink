@@ -31,19 +31,15 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.typeutils.TypeInfoParser;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.streaming.api.functions.windowing.PassThroughWindowFunction;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
 import org.apache.flink.streaming.api.functions.windowing.RichWindowFunction;
 import org.apache.flink.streaming.api.functions.windowing.WindowFunction;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
-import org.apache.flink.streaming.api.windowing.assigners.DynamicEventTimeSessionWindows;
-import org.apache.flink.streaming.api.windowing.assigners.DynamicProcessingTimeSessionWindows;
 import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows;
 import org.apache.flink.streaming.api.windowing.assigners.GlobalWindows;
 import org.apache.flink.streaming.api.windowing.assigners.ProcessingTimeSessionWindows;
-import org.apache.flink.streaming.api.windowing.assigners.SessionWindowTimeGapExtractor;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.assigners.SlidingProcessingTimeWindows;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
@@ -65,6 +61,7 @@ import org.apache.flink.streaming.runtime.operators.windowing.functions.Internal
 import org.apache.flink.streaming.runtime.operators.windowing.functions.InternalSingleValueProcessWindowFunction;
 import org.apache.flink.streaming.runtime.operators.windowing.functions.InternalSingleValueWindowFunction;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.runtime.tasks.OperatorStateHandles;
 import org.apache.flink.streaming.util.KeyedOneInputStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.apache.flink.streaming.util.TestHarnessUtil;
@@ -89,9 +86,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link WindowOperator}.
@@ -145,7 +139,7 @@ public class WindowOperatorTest extends TestLogger {
 		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple2ResultSortComparator());
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 		testHarness.close();
 
 		expectedOutput.clear();
@@ -267,7 +261,7 @@ public class WindowOperatorTest extends TestLogger {
 		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple2ResultSortComparator());
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple2ResultSortComparator());
 		testHarness.close();
 
@@ -402,9 +396,10 @@ public class WindowOperatorTest extends TestLogger {
 		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key1", 2), 1000));
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 
 		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple3ResultSortComparator());
+
 		testHarness.close();
 
 		testHarness = createTestHarness(operator);
@@ -479,9 +474,10 @@ public class WindowOperatorTest extends TestLogger {
 		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key1", 2), 1000));
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 
 		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple3ResultSortComparator());
+
 		testHarness.close();
 
 		testHarness = createTestHarness(operator);
@@ -553,7 +549,7 @@ public class WindowOperatorTest extends TestLogger {
 		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 3), 2500));
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 		testHarness.close();
 
 		testHarness = createTestHarness(operator);
@@ -626,7 +622,7 @@ public class WindowOperatorTest extends TestLogger {
 		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 3), 2500));
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 		testHarness.close();
 
 		testHarness = createTestHarness(operator);
@@ -707,7 +703,7 @@ public class WindowOperatorTest extends TestLogger {
 		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key1", 2), 1000));
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 		testHarness.close();
 
 		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key2-10", 0L, 6500L), 6499));
@@ -789,9 +785,10 @@ public class WindowOperatorTest extends TestLogger {
 		expectedOutput.add(new Watermark(3000));
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 
 		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple3ResultSortComparator());
+
 		testHarness.close();
 
 		expectedOutput.clear();
@@ -843,7 +840,7 @@ public class WindowOperatorTest extends TestLogger {
 				null /* late data output tag */);
 
 		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
-		OperatorSubtaskState snapshot;
+		OperatorStateHandles snapshot;
 
 		try (OneInputStreamOperatorTestHarness<Tuple2<String, Integer>, Tuple3<String, Long, Long>> testHarness =
 				createTestHarness(operator)) {
@@ -1014,7 +1011,7 @@ public class WindowOperatorTest extends TestLogger {
 		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 1), 1999));
 
 		// do a snapshot, close and restore again
-		OperatorSubtaskState snapshot = testHarness.snapshot(0L, 0L);
+		OperatorStateHandles snapshot = testHarness.snapshot(0L, 0L);
 
 		testHarness.close();
 
@@ -1253,177 +1250,6 @@ public class WindowOperatorTest extends TestLogger {
 				assertTrue(expectedOutput.contains(el));
 			}
 		}
-		testHarness.close();
-	}
-
-	@Test
-	@SuppressWarnings("unchecked")
-	public void testDynamicEventTimeSessionWindows() throws Exception {
-		closeCalled.set(0);
-
-		SessionWindowTimeGapExtractor<Tuple2<String, Integer>> extractor = mock(SessionWindowTimeGapExtractor.class);
-		when(extractor.extract(any(Tuple2.class))).thenAnswer(invocation -> {
-			Tuple2<String, Integer> element = (Tuple2<String, Integer>) invocation.getArguments()[0];
-			switch (element.f0) {
-				case "key1":
-					return 3000;
-				case "key2":
-					switch (element.f1) {
-						case 10:
-							return 1000;
-						default:
-							return 2000;
-					}
-				default:
-					return 0;
-			}
-		});
-
-		TypeInformation<Tuple2<String, Integer>> inputType = TypeInfoParser.parse("Tuple2<String, Integer>");
-
-		ListStateDescriptor<Tuple2<String, Integer>> stateDesc = new ListStateDescriptor<>("window-contents",
-			inputType.createSerializer(new ExecutionConfig()));
-
-		WindowOperator<String, Tuple2<String, Integer>, Iterable<Tuple2<String, Integer>>, Tuple3<String, Long, Long>, TimeWindow> operator = new WindowOperator<>(
-			DynamicEventTimeSessionWindows.withDynamicGap(extractor),
-			new TimeWindow.Serializer(),
-			new TupleKeySelector(),
-			BasicTypeInfo.STRING_TYPE_INFO.createSerializer(new ExecutionConfig()),
-			stateDesc,
-			new InternalIterableWindowFunction<>(new SessionWindowFunction()),
-			EventTimeTrigger.create(),
-			0,
-			null /* late data output tag */);
-
-		OneInputStreamOperatorTestHarness<Tuple2<String, Integer>, Tuple3<String, Long, Long>> testHarness =
-			createTestHarness(operator);
-
-		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
-
-		testHarness.open();
-
-		// test different gaps for different keys
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key1", 3), 10));
-
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 4), 5000));
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 5), 6000));
-
-		testHarness.processWatermark(new Watermark(8999));
-
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key1-3", 10L, 3010L), 3009));
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key2-9", 5000L, 8000L), 7999));
-		expectedOutput.add(new Watermark(8999));
-
-		// test gap when it produces an end time before current timeout
-		// the furthest timeout is respected
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 1), 9000));
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 2), 10000));
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 10), 10500));
-
-		testHarness.processWatermark(new Watermark(12999));
-
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key2-13", 9000L, 12000L), 11999));
-		expectedOutput.add(new Watermark(12999));
-
-		// test gap when it produces an end time after current timeout
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 10), 13000));
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 10), 13500));
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 1), 14000));
-
-		testHarness.processWatermark(new Watermark(16999));
-
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key2-21", 13000L, 16000L), 15999));
-		expectedOutput.add(new Watermark(16999));
-
-		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple3ResultSortComparator());
-
-		testHarness.close();
-	}
-
-	@Test
-	@SuppressWarnings("unchecked")
-	public void testDynamicProcessingTimeSessionWindows() throws Exception {
-		closeCalled.set(0);
-
-		SessionWindowTimeGapExtractor<Tuple2<String, Integer>> extractor = mock(SessionWindowTimeGapExtractor.class);
-		when(extractor.extract(any(Tuple2.class))).thenAnswer(invocation -> {
-			Tuple2<String, Integer> element = (Tuple2<String, Integer>) invocation.getArguments()[0];
-			switch (element.f0) {
-				case "key1":
-					return 3000;
-				case "key2":
-					switch (element.f1) {
-						case 10:
-							return 1000;
-						default:
-							return 2000;
-					}
-				default:
-					return 0;
-			}
-		});
-
-		TypeInformation<Tuple2<String, Integer>> inputType = TypeInfoParser.parse("Tuple2<String, Integer>");
-
-		ListStateDescriptor<Tuple2<String, Integer>> stateDesc = new ListStateDescriptor<>("window-contents",
-			inputType.createSerializer(new ExecutionConfig()));
-
-		WindowOperator<String, Tuple2<String, Integer>, Iterable<Tuple2<String, Integer>>, Tuple3<String, Long, Long>, TimeWindow> operator = new WindowOperator<>(
-			DynamicProcessingTimeSessionWindows.withDynamicGap(extractor),
-			new TimeWindow.Serializer(),
-			new TupleKeySelector(),
-			BasicTypeInfo.STRING_TYPE_INFO.createSerializer(new ExecutionConfig()),
-			stateDesc,
-			new InternalIterableWindowFunction<>(new SessionWindowFunction()),
-			ProcessingTimeTrigger.create(),
-			0,
-			null /* late data output tag */);
-
-		OneInputStreamOperatorTestHarness<Tuple2<String, Integer>, Tuple3<String, Long, Long>> testHarness =
-			createTestHarness(operator);
-
-		ConcurrentLinkedQueue<Object> expectedOutput = new ConcurrentLinkedQueue<>();
-
-		testHarness.open();
-
-		// test different gaps for different keys
-		testHarness.setProcessingTime(10);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key1", 3), 10));
-
-		testHarness.setProcessingTime(5000);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 4), 5000));
-		testHarness.setProcessingTime(6000);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 5), 6000));
-		testHarness.setProcessingTime(8999);
-
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key1-3", 10L, 3010L), 3009));
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key2-9", 5000L, 8000L), 7999));
-
-		// test gap when it produces an end time before current timeout
-		// the furthest timeout is respected
-		testHarness.setProcessingTime(9000);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 1), 9000));
-		testHarness.setProcessingTime(10000);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 2), 10000));
-		testHarness.setProcessingTime(10500);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 10), 10500));
-		testHarness.setProcessingTime(10500);
-
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key2-13", 9000L, 12000L), 11999));
-
-		// test gap when it produces an end time after current timeout
-		testHarness.setProcessingTime(13000);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 10), 13000));
-		testHarness.setProcessingTime(13500);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 10), 13500));
-		testHarness.setProcessingTime(14000);
-		testHarness.processElement(new StreamRecord<>(new Tuple2<>("key2", 1), 14000));
-		testHarness.setProcessingTime(16999);
-
-		expectedOutput.add(new StreamRecord<>(new Tuple3<>("key2-21", 13000L, 16000L), 15999));
-
-		TestHarnessUtil.assertOutputEqualsSorted("Output was not correct.", expectedOutput, testHarness.getOutput(), new Tuple3ResultSortComparator());
-
 		testHarness.close();
 	}
 

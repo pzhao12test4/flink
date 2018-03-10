@@ -25,7 +25,7 @@ import org.apache.flink.runtime.clusterframework.messages.NotifyResourceStarted;
 import org.apache.flink.runtime.clusterframework.messages.RegisterResourceManager;
 import org.apache.flink.runtime.clusterframework.messages.RegisterResourceManagerSuccessful;
 import org.apache.flink.runtime.instance.AkkaActorGateway;
-import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.leaderelection.TestingLeaderRetrievalService;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.testingUtils.TestingUtils;
 import org.apache.flink.util.TestLogger;
@@ -98,7 +98,7 @@ public class UtilsTest extends TestLogger {
 
 			Configuration flinkConfig = new Configuration();
 			YarnConfiguration yarnConfig = new YarnConfiguration();
-			SettableLeaderRetrievalService leaderRetrievalService = new SettableLeaderRetrievalService(
+			TestingLeaderRetrievalService leaderRetrievalService = new TestingLeaderRetrievalService(
 				null,
 				null);
 			String applicationMasterHostName = "localhost";

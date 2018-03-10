@@ -18,10 +18,6 @@
 
 package org.apache.flink.runtime.state;
 
-import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.io.Input;
-import com.esotericsoftware.kryo.io.Output;
-import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.functions.AggregateFunction;
 import org.apache.flink.api.common.functions.FoldFunction;
@@ -57,9 +53,7 @@ import org.apache.flink.queryablestate.KvStateID;
 import org.apache.flink.queryablestate.client.state.serialization.KvStateSerializer;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.checkpoint.StateAssignmentOperation;
-import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.execution.Environment;
-import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
 import org.apache.flink.runtime.operators.testutils.DummyEnvironment;
 import org.apache.flink.runtime.query.KvStateRegistry;
 import org.apache.flink.runtime.query.KvStateRegistryListener;
@@ -74,9 +68,15 @@ import org.apache.flink.runtime.state.internal.InternalValueState;
 import org.apache.flink.runtime.util.BlockerCheckpointStreamFactory;
 import org.apache.flink.shaded.guava18.com.google.common.base.Joiner;
 import org.apache.flink.types.IntValue;
+import org.apache.flink.util.FutureUtil;
 import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.StateMigrationException;
 import org.apache.flink.util.TestLogger;
+
+import com.esotericsoftware.kryo.Kryo;
+import com.esotericsoftware.kryo.io.Input;
+import com.esotericsoftware.kryo.io.Output;
+import org.apache.commons.io.output.ByteArrayOutputStream;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -114,33 +114,24 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+
 /**
- * Tests for the {@link KeyedStateBackend} and {@link OperatorStateBackend} as produced
- * by various {@link StateBackend}s.
+ * Generic tests for the partitioned state part of {@link AbstractStateBackend}.
  */
 @SuppressWarnings("serial")
 public abstract class StateBackendTestBase<B extends AbstractStateBackend> extends TestLogger {
 
 	@Rule
-	public final ExpectedException expectedException = ExpectedException.none();
-
-	// lazily initialized stream storage
-	private CheckpointStorageLocation checkpointStorageLocation;
+	public ExpectedException expectedException = ExpectedException.none();
 
 	protected abstract B getStateBackend() throws Exception;
 
 	protected CheckpointStreamFactory createStreamFactory() throws Exception {
-		if (checkpointStorageLocation == null) {
-			checkpointStorageLocation = getStateBackend()
-					.createCheckpointStorage(new JobID())
-					.initializeLocationForCheckpoint(1L);
-		}
-
-		return checkpointStorageLocation;
+		return getStateBackend().createStreamFactory(new JobID(), "test_op");
 	}
 
 	protected <K> AbstractKeyedStateBackend<K> createKeyedBackend(TypeSerializer<K> keySerializer) throws Exception {
-		return createKeyedBackend(keySerializer, new DummyEnvironment());
+		return createKeyedBackend(keySerializer, new DummyEnvironment("test", 1, 0));
 	}
 
 	protected <K> AbstractKeyedStateBackend<K> createKeyedBackend(TypeSerializer<K> keySerializer, Environment env) throws Exception {
@@ -172,7 +163,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	}
 
 	protected <K> AbstractKeyedStateBackend<K> restoreKeyedBackend(TypeSerializer<K> keySerializer, KeyedStateHandle state) throws Exception {
-		return restoreKeyedBackend(keySerializer, state, new DummyEnvironment());
+		return restoreKeyedBackend(keySerializer, state, new DummyEnvironment("test", 1, 0));
 	}
 
 	protected <K> AbstractKeyedStateBackend<K> restoreKeyedBackend(
@@ -203,59 +194,31 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			keyGroupRange,
 			env.getTaskKvStateRegistry());
 
-		backend.restore(new StateObjectCollection<>(state));
+		backend.restore(state);
 
 		return backend;
 	}
 
 	@Test
 	public void testGetKeys() throws Exception {
-		final int namespace1ElementsNum = 1000;
-		final int namespace2ElementsNum = 1000;
+		final int elementsToTest = 1000;
 		String fieldName = "get-keys-test";
 		AbstractKeyedStateBackend<Integer> backend = createKeyedBackend(IntSerializer.INSTANCE);
 		try {
-			final String ns1 = "ns1";
-			ValueState<Integer> keyedState1 = backend.getPartitionedState(
-				ns1,
-				StringSerializer.INSTANCE,
-				new ValueStateDescriptor<>(fieldName, IntSerializer.INSTANCE)
-			);
+			ValueState<Integer> keyedState = backend.getOrCreateKeyedState(
+				VoidNamespaceSerializer.INSTANCE,
+				new ValueStateDescriptor<>(fieldName, IntSerializer.INSTANCE));
+			((InternalValueState<VoidNamespace, Integer>) keyedState).setCurrentNamespace(VoidNamespace.INSTANCE);
 
-			for (int key = 0; key < namespace1ElementsNum; key++) {
+			for (int key = 0; key < elementsToTest; key++) {
 				backend.setCurrentKey(key);
-				keyedState1.update(key * 2);
+				keyedState.update(key * 2);
 			}
 
-			final String ns2 = "ns2";
-			ValueState<Integer> keyedState2 = backend.getPartitionedState(
-				ns2,
-				StringSerializer.INSTANCE,
-				new ValueStateDescriptor<>(fieldName, IntSerializer.INSTANCE)
-			);
-
-			for (int key = namespace1ElementsNum; key < namespace1ElementsNum + namespace2ElementsNum; key++) {
-				backend.setCurrentKey(key);
-				keyedState2.update(key * 2);
-			}
-
-			// valid for namespace1
-			try (Stream<Integer> keysStream = backend.getKeys(fieldName, ns1).sorted()) {
+			try (Stream<Integer> keysStream = backend.getKeys(fieldName, VoidNamespace.INSTANCE).sorted()) {
 				PrimitiveIterator.OfInt actualIterator = keysStream.mapToInt(value -> value.intValue()).iterator();
 
-				for (int expectedKey = 0; expectedKey < namespace1ElementsNum; expectedKey++) {
-					assertTrue(actualIterator.hasNext());
-					assertEquals(expectedKey, actualIterator.nextInt());
-				}
-
-				assertFalse(actualIterator.hasNext());
-			}
-
-			// valid for namespace2
-			try (Stream<Integer> keysStream = backend.getKeys(fieldName, ns2).sorted()) {
-				PrimitiveIterator.OfInt actualIterator = keysStream.mapToInt(value -> value.intValue()).iterator();
-
-				for (int expectedKey = namespace1ElementsNum; expectedKey < namespace1ElementsNum + namespace2ElementsNum; expectedKey++) {
+				for (int expectedKey = 0; expectedKey < elementsToTest; expectedKey++) {
 					assertTrue(actualIterator.hasNext());
 					assertEquals(expectedKey, actualIterator.nextInt());
 				}
@@ -273,7 +236,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	@SuppressWarnings("unchecked")
 	public void testBackendUsesRegisteredKryoDefaultSerializer() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 		AbstractKeyedStateBackend<Integer> backend = createKeyedBackend(IntSerializer.INSTANCE, env);
 
 		// cast because our test serializer is not typed to TestPojo
@@ -309,7 +272,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 		try {
 			// backends that lazily serializes (such as memory state backend) will fail here
-			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 		} catch (ExpectedKryoTestException e) {
 			numExceptions++;
 		} catch (Exception e) {
@@ -328,7 +291,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	@SuppressWarnings("unchecked")
 	public void testBackendUsesRegisteredKryoDefaultSerializerUsingGetOrCreate() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 		AbstractKeyedStateBackend<Integer> backend = createKeyedBackend(IntSerializer.INSTANCE, env);
 
 		// cast because our test serializer is not typed to TestPojo
@@ -369,7 +332,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 		try {
 			// backends that lazily serializes (such as memory state backend) will fail here
-			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 		} catch (ExpectedKryoTestException e) {
 			numExceptions++;
 		} catch (Exception e) {
@@ -387,7 +350,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	@Test
 	public void testBackendUsesRegisteredKryoSerializer() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 		AbstractKeyedStateBackend<Integer> backend = createKeyedBackend(IntSerializer.INSTANCE, env);
 
 		env.getExecutionConfig()
@@ -423,7 +386,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 		try {
 			// backends that lazily serializes (such as memory state backend) will fail here
-			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 		} catch (ExpectedKryoTestException e) {
 			numExceptions++;
 		} catch (Exception e) {
@@ -442,7 +405,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	@SuppressWarnings("unchecked")
 	public void testBackendUsesRegisteredKryoSerializerUsingGetOrCreate() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 		AbstractKeyedStateBackend<Integer> backend = createKeyedBackend(IntSerializer.INSTANCE, env);
 
 		env.getExecutionConfig().registerTypeWithKryoSerializer(TestPojo.class, ExceptionThrowingTestSerializer.class);
@@ -479,7 +442,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 		try {
 			// backends that lazily serializes (such as memory state backend) will fail here
-			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 		} catch (ExpectedKryoTestException e) {
 			numExceptions++;
 		} catch (Exception e) {
@@ -506,7 +469,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	@Test
 	public void testKryoRegisteringRestoreResilienceWithRegisteredType() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 		AbstractKeyedStateBackend<Integer> backend = createKeyedBackend(IntSerializer.INSTANCE, env);
 
 		TypeInformation<TestPojo> pojoType = new GenericTypeInfo<>(TestPojo.class);
@@ -531,7 +494,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				682375462378L,
 				2,
 				streamFactory,
-				CheckpointOptions.forCheckpointWithDefaultLocation()));
+				CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 
@@ -568,7 +531,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	public void testKryoRegisteringRestoreResilienceWithDefaultSerializer() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
 		SharedStateRegistry sharedStateRegistry = new SharedStateRegistry();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 		AbstractKeyedStateBackend<Integer> backend = null;
 
 		try {
@@ -596,7 +559,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				682375462378L,
 				2,
 				streamFactory,
-				CheckpointOptions.forCheckpointWithDefaultLocation()));
+				CheckpointOptions.forCheckpoint()));
 
 			snapshot.registerSharedStates(sharedStateRegistry);
 			backend.dispose();
@@ -622,7 +585,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				682375462378L,
 				2,
 				streamFactory,
-				CheckpointOptions.forCheckpointWithDefaultLocation()));
+				CheckpointOptions.forCheckpoint()));
 
 			snapshot2.registerSharedStates(sharedStateRegistry);
 			snapshot.discardState();
@@ -670,7 +633,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	public void testKryoRegisteringRestoreResilienceWithRegisteredSerializer() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
 		SharedStateRegistry sharedStateRegistry = new SharedStateRegistry();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 
 		AbstractKeyedStateBackend<Integer> backend = null;
 
@@ -698,7 +661,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				682375462378L,
 				2,
 				streamFactory,
-				CheckpointOptions.forCheckpointWithDefaultLocation()));
+				CheckpointOptions.forCheckpoint()));
 
 			snapshot.registerSharedStates(sharedStateRegistry);
 			backend.dispose();
@@ -723,7 +686,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				682375462378L,
 				2,
 				streamFactory,
-				CheckpointOptions.forCheckpointWithDefaultLocation()));
+				CheckpointOptions.forCheckpoint()));
 
 			snapshot2.registerSharedStates(sharedStateRegistry);
 
@@ -760,7 +723,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	@Test
 	public void testKryoRestoreResilienceWithDifferentRegistrationOrder() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 
 		// register A first then B
 		env.getExecutionConfig().registerKryoType(TestNestedPojoClassA.class);
@@ -789,13 +752,13 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			682375462378L,
 			2,
 			streamFactory,
-			CheckpointOptions.forCheckpointWithDefaultLocation()));
+			CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 
 		// ========== restore snapshot, with a different registration order in the configuration ==========
 
-		env = new DummyEnvironment();
+		env = new DummyEnvironment("test", 1, 0);
 
 		env.getExecutionConfig().registerKryoType(TestNestedPojoClassB.class); // this time register B first
 		env.getExecutionConfig().registerKryoType(TestNestedPojoClassA.class);
@@ -819,7 +782,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			682375462378L,
 			2,
 			streamFactory,
-			CheckpointOptions.forCheckpointWithDefaultLocation()));
+			CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 	}
@@ -827,7 +790,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	@Test
 	public void testPojoRestoreResilienceWithDifferentRegistrationOrder() throws Exception {
 		CheckpointStreamFactory streamFactory = createStreamFactory();
-		Environment env = new DummyEnvironment();
+		Environment env = new DummyEnvironment("test", 1, 0);
 
 		// register A first then B
 		env.getExecutionConfig().registerPojoType(TestNestedPojoClassA.class);
@@ -856,13 +819,13 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			682375462378L,
 			2,
 			streamFactory,
-			CheckpointOptions.forCheckpointWithDefaultLocation()));
+			CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 
 		// ========== restore snapshot, with a different registration order in the configuration ==========
 
-		env = new DummyEnvironment();
+		env = new DummyEnvironment("test", 1, 0);
 
 		env.getExecutionConfig().registerPojoType(TestNestedPojoClassB.class); // this time register B first
 		env.getExecutionConfig().registerPojoType(TestNestedPojoClassA.class);
@@ -886,7 +849,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			682375462378L,
 			2,
 			streamFactory,
-			CheckpointOptions.forCheckpointWithDefaultLocation()));
+			CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 	}
@@ -923,7 +886,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		assertEquals("1", getSerializedValue(kvState, 1, keySerializer, VoidNamespace.INSTANCE, namespaceSerializer, valueSerializer));
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// make some more modifications
 		backend.setCurrentKey(1);
@@ -934,7 +897,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		state.update("u3");
 
 		// draw another snapshot
-		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot2 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// validate the original state
 		backend.setCurrentKey(1);
@@ -1109,7 +1072,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				IntSerializer.INSTANCE,
 				1,
 				new KeyGroupRange(0, 0),
-				new DummyEnvironment());
+				new DummyEnvironment("test_op", 1, 0));
 
 		ValueStateDescriptor<String> desc1 = new ValueStateDescriptor<>("a-string", StringSerializer.INSTANCE);
 		ValueStateDescriptor<Integer> desc2 = new ValueStateDescriptor<>("an-integer", IntSerializer.INSTANCE);
@@ -1133,8 +1096,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		assertEquals(13, (int) state2.value());
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 =
-			runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 		backend = restoreKeyedBackend(
@@ -1142,7 +1104,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				1,
 				new KeyGroupRange(0, 0),
 				Collections.singletonList(snapshot1),
-				new DummyEnvironment());
+				new DummyEnvironment("test_op", 1, 0));
 
 		snapshot1.discardState();
 
@@ -1206,7 +1168,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		assertEquals(42L, (long) state.value());
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 		backend = restoreKeyedBackend(IntSerializer.INSTANCE, snapshot1);
@@ -1254,7 +1216,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		assertEquals("1", joiner.join(getSerializedList(kvState, 1, keySerializer, VoidNamespace.INSTANCE, namespaceSerializer, valueSerializer)));
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// make some more modifications
 		backend.setCurrentKey(1);
@@ -1267,7 +1229,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		state.add("u3");
 
 		// draw another snapshot
-		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// validate the original state
 		backend.setCurrentKey(1);
@@ -1323,158 +1285,6 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		backend.dispose();
 	}
 
-	/**
-	 * This test verifies that all ListState implementations are consistent in not allowing
-	 * adding {@code null}.
-	 */
-	@Test
-	public void testListStateAddNull() throws Exception {
-		AbstractKeyedStateBackend<String> keyedBackend = createKeyedBackend(StringSerializer.INSTANCE);
-
-		final ListStateDescriptor<Long> stateDescr = new ListStateDescriptor<>("my-state", Long.class);
-
-		try {
-			ListState<Long> state =
-				keyedBackend.getPartitionedState(
-					VoidNamespace.INSTANCE,
-					VoidNamespaceSerializer.INSTANCE,
-					stateDescr);
-
-			keyedBackend.setCurrentKey("abc");
-			assertNull(state.get());
-
-			expectedException.expect(NullPointerException.class);
-			state.add(null);
-		} finally {
-			keyedBackend.close();
-			keyedBackend.dispose();
-		}
-	}
-
-	/**
-	 * This test verifies that all ListState implementations are consistent in not allowing
-	 * {@link ListState#addAll(List)} to be called with {@code null} entries in the list of entries
-	 * to add.
-	 */
-	@Test
-	public void testListStateAddAllNullEntries() throws Exception {
-		AbstractKeyedStateBackend<String> keyedBackend = createKeyedBackend(StringSerializer.INSTANCE);
-
-		final ListStateDescriptor<Long> stateDescr = new ListStateDescriptor<>("my-state", Long.class);
-
-		try {
-			ListState<Long> state =
-				keyedBackend.getPartitionedState(
-					VoidNamespace.INSTANCE,
-					VoidNamespaceSerializer.INSTANCE,
-					stateDescr);
-
-			keyedBackend.setCurrentKey("abc");
-			assertNull(state.get());
-
-			expectedException.expect(NullPointerException.class);
-
-			List<Long> adding = new ArrayList<>();
-			adding.add(3L);
-			adding.add(null);
-			adding.add(5L);
-			state.addAll(adding);
-		} finally {
-			keyedBackend.close();
-			keyedBackend.dispose();
-		}
-	}
-
-	/**
-	 * This test verifies that all ListState implementations are consistent in not allowing
-	 * {@link ListState#addAll(List)} to be called with {@code null}.
-	 */
-	@Test
-	public void testListStateAddAllNull() throws Exception {
-		AbstractKeyedStateBackend<String> keyedBackend = createKeyedBackend(StringSerializer.INSTANCE);
-
-		final ListStateDescriptor<Long> stateDescr = new ListStateDescriptor<>("my-state", Long.class);
-
-		try {
-			ListState<Long> state =
-				keyedBackend.getPartitionedState(
-					VoidNamespace.INSTANCE,
-					VoidNamespaceSerializer.INSTANCE,
-					stateDescr);
-
-			keyedBackend.setCurrentKey("abc");
-			assertNull(state.get());
-
-			expectedException.expect(NullPointerException.class);
-			state.addAll(null);
-		} finally {
-			keyedBackend.close();
-			keyedBackend.dispose();
-		}
-	}
-
-	/**
-	 * This test verifies that all ListState implementations are consistent in not allowing
-	 * {@link ListState#addAll(List)} to be called with {@code null} entries in the list of entries
-	 * to add.
-	 */
-	@Test
-	public void testListStateUpdateNullEntries() throws Exception {
-		AbstractKeyedStateBackend<String> keyedBackend = createKeyedBackend(StringSerializer.INSTANCE);
-
-		final ListStateDescriptor<Long> stateDescr = new ListStateDescriptor<>("my-state", Long.class);
-
-		try {
-			ListState<Long> state =
-				keyedBackend.getPartitionedState(
-					VoidNamespace.INSTANCE,
-					VoidNamespaceSerializer.INSTANCE,
-					stateDescr);
-
-			keyedBackend.setCurrentKey("abc");
-			assertNull(state.get());
-
-			expectedException.expect(NullPointerException.class);
-
-			List<Long> adding = new ArrayList<>();
-			adding.add(3L);
-			adding.add(null);
-			adding.add(5L);
-			state.update(adding);
-		} finally {
-			keyedBackend.close();
-			keyedBackend.dispose();
-		}
-	}
-
-	/**
-	 * This test verifies that all ListState implementations are consistent in not allowing
-	 * {@link ListState#addAll(List)} to be called with {@code null}.
-	 */
-	@Test
-	public void testListStateUpdateNull() throws Exception {
-		AbstractKeyedStateBackend<String> keyedBackend = createKeyedBackend(StringSerializer.INSTANCE);
-
-		final ListStateDescriptor<Long> stateDescr = new ListStateDescriptor<>("my-state", Long.class);
-
-		try {
-			ListState<Long> state =
-				keyedBackend.getPartitionedState(
-					VoidNamespace.INSTANCE,
-					VoidNamespaceSerializer.INSTANCE,
-					stateDescr);
-
-			keyedBackend.setCurrentKey("abc");
-			assertNull(state.get());
-
-			expectedException.expect(NullPointerException.class);
-			state.update(null);
-		} finally {
-			keyedBackend.close();
-			keyedBackend.dispose();
-		}
-	}
-
 	@Test
 	public void testListStateAPIs() throws Exception {
 
@@ -1486,16 +1296,25 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			ListState<Long> state =
 				keyedBackend.getPartitionedState(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, stateDescr);
 
+			keyedBackend.setCurrentKey("abc");
+			assertNull(state.get());
+			state.add(null);
+			assertNull(state.get());
+
 			keyedBackend.setCurrentKey("def");
 			assertNull(state.get());
 			state.add(17L);
 			state.add(11L);
 			assertThat(state.get(), containsInAnyOrder(17L, 11L));
+			// update(null) should remain the value null
+			state.update(null);
+			assertNull(state.get());
 			// update(emptyList) should remain the value null
 			state.update(Collections.emptyList());
 			assertNull(state.get());
 			state.update(Arrays.asList(10L, 16L));
 			assertThat(state.get(), containsInAnyOrder(16L, 10L));
+			state.add(null);
 			assertThat(state.get(), containsInAnyOrder(16L, 10L));
 
 			keyedBackend.setCurrentKey("abc");
@@ -1503,11 +1322,13 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 			keyedBackend.setCurrentKey("g");
 			assertNull(state.get());
+			state.addAll(null);
 			assertNull(state.get());
 			state.addAll(Collections.emptyList());
 			assertNull(state.get());
 			state.addAll(Arrays.asList(3L, 4L));
 			assertThat(state.get(), containsInAnyOrder(3L, 4L));
+			state.addAll(null);
 			assertThat(state.get(), containsInAnyOrder(3L, 4L));
 			state.addAll(new ArrayList<>());
 			assertThat(state.get(), containsInAnyOrder(3L, 4L));
@@ -1516,6 +1337,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			state.addAll(new ArrayList<>());
 			assertThat(state.get(), containsInAnyOrder(3L, 4L, 5L, 6L));
 
+			state.add(null);
 			assertThat(state.get(), containsInAnyOrder(3L, 4L, 5L, 6L));
 			state.update(Arrays.asList(1L, 2L));
 			assertThat(state.get(), containsInAnyOrder(1L, 2L));
@@ -1694,7 +1516,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		assertEquals("1", getSerializedValue(kvState, 1, keySerializer, VoidNamespace.INSTANCE, namespaceSerializer, valueSerializer));
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// make some more modifications
 		backend.setCurrentKey(1);
@@ -1705,7 +1527,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		state.add("u3");
 
 		// draw another snapshot
-		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// validate the original state
 		backend.setCurrentKey(1);
@@ -1934,7 +1756,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 		final AggregatingStateDescriptor<Long, MutableLong, Long> stateDescr =
 			new AggregatingStateDescriptor<>("my-state", new MutableAggregatingAddingFunction(), MutableLong.class);
-
+		
 		AbstractKeyedStateBackend<String> keyedBackend = createKeyedBackend(StringSerializer.INSTANCE);
 
 		try {
@@ -2310,7 +2132,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		assertEquals("Fold-Initial:,1", getSerializedValue(kvState, 1, keySerializer, VoidNamespace.INSTANCE, namespaceSerializer, valueSerializer));
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// make some more modifications
 		backend.setCurrentKey(1);
@@ -2322,7 +2144,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		state.add(103);
 
 		// draw another snapshot
-		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// validate the original state
 		backend.setCurrentKey(1);
@@ -2409,7 +2231,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				getSerializedMap(kvState, 1, keySerializer, VoidNamespace.INSTANCE, namespaceSerializer, userKeySerializer, userValueSerializer));
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// make some more modifications
 		backend.setCurrentKey(1);
@@ -2421,7 +2243,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		state.putAll(new HashMap<Integer, String>() {{ put(1031, "1031"); put(1032, "1032"); }});
 
 		// draw another snapshot
-		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot2 = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		// validate the original state
 		backend.setCurrentKey(1);
@@ -2700,7 +2522,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				IntSerializer.INSTANCE,
 				MAX_PARALLELISM,
 				new KeyGroupRange(0, MAX_PARALLELISM - 1),
-				new DummyEnvironment());
+				new DummyEnvironment("test", 1, 0));
 
 		ValueStateDescriptor<String> kvId = new ValueStateDescriptor<>("id", String.class);
 
@@ -2727,7 +2549,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		state.update("ShouldBeInSecondHalf");
 
 
-		KeyedStateHandle snapshot = runSnapshot(backend.snapshot(0, 0, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot = FutureUtil.runIfNotDoneAndGet(backend.snapshot(0, 0, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		List<KeyedStateHandle> firstHalfKeyGroupStates = StateAssignmentOperation.getKeyedStateHandles(
 				Collections.singletonList(snapshot),
@@ -2745,7 +2567,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				MAX_PARALLELISM,
 				new KeyGroupRange(0, 4),
 				firstHalfKeyGroupStates,
-				new DummyEnvironment());
+				new DummyEnvironment("test", 1, 0));
 
 		// backend for the second half of the key group range
 		final AbstractKeyedStateBackend<Integer> secondHalfBackend = restoreKeyedBackend(
@@ -2753,7 +2575,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				MAX_PARALLELISM,
 				new KeyGroupRange(5, 9),
 				secondHalfKeyGroupStates,
-				new DummyEnvironment());
+				new DummyEnvironment("test", 1, 0));
 
 
 		ValueState<String> firstHalfState = firstHalfBackend.getPartitionedState(VoidNamespace.INSTANCE, VoidNamespaceSerializer.INSTANCE, kvId);
@@ -2794,7 +2616,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		state.update("2");
 
 		// draw a snapshot
-		KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 
@@ -2825,7 +2647,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			state.update("2");
 
 			// draw a snapshot
-			KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 			backend.dispose();
 			// restore the first snapshot and validate it
@@ -2868,7 +2690,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			state.add("2");
 
 			// draw a snapshot
-			KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 			backend.dispose();
 			// restore the first snapshot and validate it
@@ -2913,7 +2735,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			state.add("2");
 
 			// draw a snapshot
-			KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 			backend.dispose();
 			// restore the first snapshot and validate it
@@ -2956,7 +2778,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			state.put("2", "Second");
 
 			// draw a snapshot
-			KeyedStateHandle snapshot1 = runSnapshot(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+			KeyedStateHandle snapshot1 = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462378L, 2, streamFactory, CheckpointOptions.forCheckpoint()));
 
 			backend.dispose();
 			// restore the first snapshot and validate it
@@ -3050,7 +2872,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				IntSerializer.INSTANCE,
 				numberOfKeyGroups,
 				new KeyGroupRange(0, 0),
-				new DummyEnvironment());
+				new DummyEnvironment("test_op", 1, 0));
 
 		{
 			// ValueState
@@ -3193,7 +3015,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 	 */
 	@Test
 	public void testQueryableStateRegistration() throws Exception {
-		DummyEnvironment env = new DummyEnvironment();
+		DummyEnvironment env = new DummyEnvironment("test", 1, 0);
 		KvStateRegistry registry = env.getKvStateRegistry();
 
 		CheckpointStreamFactory streamFactory = createStreamFactory();
@@ -3201,7 +3023,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		KeyGroupRange expectedKeyGroupRange = backend.getKeyGroupRange();
 
 		KvStateRegistryListener listener = mock(KvStateRegistryListener.class);
-		registry.registerListener(HighAvailabilityServices.DEFAULT_JOB_ID, listener);
+		registry.registerListener(listener);
 
 		ValueStateDescriptor<Integer> desc = new ValueStateDescriptor<>(
 				"test",
@@ -3215,7 +3037,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				eq(env.getJobID()), eq(env.getJobVertexId()), eq(expectedKeyGroupRange), eq("banana"), any(KvStateID.class));
 
 
-		KeyedStateHandle snapshot = runSnapshot(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+		KeyedStateHandle snapshot = FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462379L, 4, streamFactory, CheckpointOptions.forCheckpoint()));
 
 		backend.dispose();
 
@@ -3247,7 +3069,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 
 			// draw a snapshot
 			KeyedStateHandle snapshot =
-				runSnapshot(backend.snapshot(682375462379L, 1, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation()));
+					FutureUtil.runIfNotDoneAndGet(backend.snapshot(682375462379L, 1, streamFactory, CheckpointOptions.forCheckpoint()));
 			assertNull(snapshot);
 			backend.dispose();
 
@@ -3335,8 +3157,8 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				valueState.update(i);
 			}
 
-			RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot1 =
-				backend.snapshot(0L, 0L, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation());
+			RunnableFuture<KeyedStateHandle> snapshot1 =
+				backend.snapshot(0L, 0L, streamFactory, CheckpointOptions.forCheckpoint());
 
 			Thread runner1 = new Thread(snapshot1, "snapshot-1-runner");
 			runner1.start();
@@ -3353,8 +3175,8 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			streamFactory.setWaiterLatch(null);
 			streamFactory.setBlockerLatch(null);
 
-			RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot2 =
-				backend.snapshot(1L, 1L, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation());
+			RunnableFuture<KeyedStateHandle> snapshot2 =
+				backend.snapshot(1L, 1L, streamFactory, CheckpointOptions.forCheckpoint());
 
 			Thread runner2 = new Thread(snapshot2,"snapshot-2-runner");
 			runner2.start();
@@ -3392,8 +3214,8 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				valueState.update(i);
 			}
 
-			RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-					backend.snapshot(0L, 0L, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation());
+			RunnableFuture<KeyedStateHandle> snapshot =
+					backend.snapshot(0L, 0L, streamFactory, CheckpointOptions.forCheckpoint());
 			Thread runner = new Thread(snapshot);
 			runner.start();
 			for (int i = 0; i < 20; ++i) {
@@ -3405,8 +3227,7 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 			}
 
 			runner.join();
-			SnapshotResult<KeyedStateHandle> snapshotResult = snapshot.get();
-			stateHandle = snapshotResult.getJobManagerOwnedSnapshot();
+			stateHandle = snapshot.get();
 
 			// test isolation
 			for (int i = 0; i < 20; ++i) {
@@ -3477,8 +3298,8 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 				valueState.update(i);
 			}
 
-			RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshot =
-					backend.snapshot(0L, 0L, streamFactory, CheckpointOptions.forCheckpointWithDefaultLocation());
+			RunnableFuture<KeyedStateHandle> snapshot =
+					backend.snapshot(0L, 0L, streamFactory, CheckpointOptions.forCheckpoint());
 
 			Thread runner = new Thread(snapshot);
 			runner.start();
@@ -3589,15 +3410,12 @@ public abstract class StateBackendTestBase<B extends AbstractStateBackend> exten
 		}
 	}
 
-	protected KeyedStateHandle runSnapshot(
-		RunnableFuture<SnapshotResult<KeyedStateHandle>> snapshotRunnableFuture) throws Exception {
-
-		if (!snapshotRunnableFuture.isDone()) {
-			snapshotRunnableFuture.run();
+	protected KeyedStateHandle runSnapshot(RunnableFuture<KeyedStateHandle> snapshotRunnableFuture) throws Exception {
+		if(!snapshotRunnableFuture.isDone()) {
+			Thread runner = new Thread(snapshotRunnableFuture);
+			runner.start();
 		}
-
-		SnapshotResult<KeyedStateHandle> snapshotResult = snapshotRunnableFuture.get();
-		return snapshotResult.getJobManagerOwnedSnapshot();
+		return snapshotRunnableFuture.get();
 	}
 
 	public static class TestPojo implements Serializable {

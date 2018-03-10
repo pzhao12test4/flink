@@ -23,10 +23,9 @@ import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
-import org.apache.flink.runtime.clusterframework.types.SlotProfile;
 import org.apache.flink.runtime.executiongraph.utils.SimpleAckingTaskManagerGateway;
 import org.apache.flink.runtime.instance.SlotSharingGroupId;
-import org.apache.flink.runtime.jobmanager.scheduler.DummyScheduledUnit;
+import org.apache.flink.runtime.jobmanager.scheduler.NoResourceAvailableException;
 import org.apache.flink.runtime.jobmanager.scheduler.ScheduledUnit;
 import org.apache.flink.runtime.jobmanager.scheduler.SchedulerTestUtils;
 import org.apache.flink.runtime.jobmanager.slots.TaskManagerGateway;
@@ -52,6 +51,7 @@ import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.TestLogger;
 
 import akka.actor.ActorSystem;
+import akka.pattern.AskTimeoutException;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -59,13 +59,14 @@ import org.junit.experimental.categories.Category;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 import static org.apache.flink.runtime.jobmaster.slotpool.AvailableSlotsTest.DEFAULT_TESTING_PROFILE;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -79,8 +80,6 @@ public class SlotPoolRpcTest extends TestLogger {
 
 	private static final Time timeout = Time.seconds(10L);
 
-	private static final Time fastTimeout = Time.milliseconds(1L);
-
 	// ------------------------------------------------------------------------
 	//  setup
 	// ------------------------------------------------------------------------
@@ -92,9 +91,9 @@ public class SlotPoolRpcTest extends TestLogger {
 	}
 
 	@AfterClass
-	public static  void shutdown() throws InterruptedException, ExecutionException, TimeoutException {
+	public static  void shutdown() {
 		if (rpcService != null) {
-			RpcUtils.terminateRpcService(rpcService, timeout);
+			rpcService.stopService();
 			rpcService = null;
 		}
 	}
@@ -112,7 +111,8 @@ public class SlotPoolRpcTest extends TestLogger {
 			jid,
 			SystemClock.getInstance(),
 			TestingUtils.infiniteTime(),
-			TestingUtils.infiniteTime()
+			TestingUtils.infiniteTime(),
+			Time.milliseconds(10L) // this is the timeout for the request tested here
 		);
 
 		try {
@@ -121,15 +121,16 @@ public class SlotPoolRpcTest extends TestLogger {
 			CompletableFuture<LogicalSlot> future = pool.allocateSlot(
 				new SlotRequestId(),
 				new ScheduledUnit(SchedulerTestUtils.getDummyTask()),
-				SlotProfile.noLocality(DEFAULT_TESTING_PROFILE),
+				DEFAULT_TESTING_PROFILE,
+				Collections.emptyList(),
 				true,
-				fastTimeout);
+				TestingUtils.infiniteTime());
 
 			try {
 				future.get();
 				fail("We expected an ExecutionException.");
 			} catch (ExecutionException e) {
-				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof TimeoutException);
+				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof NoResourceAvailableException);
 			}
 		} finally {
 			RpcUtils.terminateRpcEndpoint(pool, timeout);
@@ -145,11 +146,10 @@ public class SlotPoolRpcTest extends TestLogger {
 			jid,
 			SystemClock.getInstance(),
 			TestingUtils.infiniteTime(),
+			TestingUtils.infiniteTime(),
 			TestingUtils.infiniteTime());
 
 		try {
-			final CompletableFuture<SlotRequestId> timeoutFuture = new CompletableFuture<>();
-			pool.setTimeoutPendingSlotRequestConsumer(slotRequestId -> timeoutFuture.complete(slotRequestId));
 			pool.start(JobMasterId.generate(), "foobar");
 			SlotPoolGateway slotPoolGateway = pool.getSelfGateway(SlotPoolGateway.class);
 
@@ -157,19 +157,21 @@ public class SlotPoolRpcTest extends TestLogger {
 			CompletableFuture<LogicalSlot> future = slotPoolGateway.allocateSlot(
 				requestId,
 				new ScheduledUnit(SchedulerTestUtils.getDummyTask()),
-				SlotProfile.noLocality(DEFAULT_TESTING_PROFILE),
+				DEFAULT_TESTING_PROFILE,
+				Collections.emptyList(),
 				true,
-				fastTimeout);
+				Time.milliseconds(10L));
 
 			try {
 				future.get();
-				fail("We expected a TimeoutException.");
+				fail("We expected a AskTimeoutException.");
 			} catch (ExecutionException e) {
-				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof TimeoutException);
+				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof AskTimeoutException);
 			}
 
-			// wait for the timeout of the pending slot request
-			timeoutFuture.get();
+			assertEquals(1L, (long) pool.getNumberOfWaitingForResourceRequests().get());
+
+			slotPoolGateway.releaseSlot(requestId, null, null).get();
 
 			assertEquals(0L, (long) pool.getNumberOfWaitingForResourceRequests().get());
 		} finally {
@@ -177,17 +179,15 @@ public class SlotPoolRpcTest extends TestLogger {
 		}
 	}
 
-	/**
-	 * Tests that a slot allocation times out wrt to the specified time out.
-	 */
 	@Test
-	public void testSlotAllocationTimeout() throws Exception {
+	public void testCancelSlotAllocationWithResourceManager() throws Exception {
 		final JobID jid = new JobID();
 
 		final TestingSlotPool pool = new TestingSlotPool(
 			rpcService,
 			jid,
 			SystemClock.getInstance(),
+			TestingUtils.infiniteTime(),
 			TestingUtils.infiniteTime(),
 			TestingUtils.infiniteTime());
 
@@ -201,18 +201,22 @@ public class SlotPoolRpcTest extends TestLogger {
 			SlotRequestId requestId = new SlotRequestId();
 			CompletableFuture<LogicalSlot> future = slotPoolGateway.allocateSlot(
 				requestId,
-				new DummyScheduledUnit(),
-				SlotProfile.noLocality(DEFAULT_TESTING_PROFILE),
+				new ScheduledUnit(SchedulerTestUtils.getDummyTask()),
+				DEFAULT_TESTING_PROFILE,
+				Collections.emptyList(),
 				true,
-				fastTimeout);
+				Time.milliseconds(10L));
 
 			try {
 				future.get();
-				fail("We expected a TimeoutException.");
+				fail("We expected a AskTimeoutException.");
 			} catch (ExecutionException e) {
-				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof TimeoutException);
+				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof AskTimeoutException);
 			}
 
+			assertEquals(1L, (long) pool.getNumberOfPendingRequests().get());
+
+			slotPoolGateway.releaseSlot(requestId, null, null).get();
 			assertEquals(0L, (long) pool.getNumberOfPendingRequests().get());
 		} finally {
 			RpcUtils.terminateRpcEndpoint(pool, timeout);
@@ -220,16 +224,17 @@ public class SlotPoolRpcTest extends TestLogger {
 	}
 
 	/**
-	 * Tests that extra slots are kept by the {@link SlotPool}.
+	 * Tests that allocated slots are not cancelled.
 	 */
 	@Test
-	public void testExtraSlotsAreKept() throws Exception {
+	public void testCancelSlotAllocationWhileSlotFulfilled() throws Exception {
 		final JobID jid = new JobID();
 
 		final TestingSlotPool pool = new TestingSlotPool(
 			rpcService,
 			jid,
 			SystemClock.getInstance(),
+			TestingUtils.infiniteTime(),
 			TestingUtils.infiniteTime(),
 			TestingUtils.infiniteTime());
 
@@ -249,18 +254,17 @@ public class SlotPoolRpcTest extends TestLogger {
 			CompletableFuture<LogicalSlot> future = slotPoolGateway.allocateSlot(
 				requestId,
 				new ScheduledUnit(SchedulerTestUtils.getDummyTask()),
-				SlotProfile.noLocality(DEFAULT_TESTING_PROFILE),
+				DEFAULT_TESTING_PROFILE,
+				Collections.emptyList(),
 				true,
-				fastTimeout);
+				Time.milliseconds(10L));
 
 			try {
 				future.get();
-				fail("We expected a TimeoutException.");
+				fail("We expected a AskTimeoutException.");
 			} catch (ExecutionException e) {
-				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof TimeoutException);
+				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof AskTimeoutException);
 			}
-
-			assertEquals(0L, (long) pool.getNumberOfPendingRequests().get());
 
 			AllocationID allocationId = allocationIdFuture.get();
 			final SlotOffer slotOffer = new SlotOffer(
@@ -274,6 +278,13 @@ public class SlotPoolRpcTest extends TestLogger {
 
 			assertTrue(slotPoolGateway.offerSlot(taskManagerLocation, taskManagerGateway, slotOffer).get());
 
+			assertEquals(0L, (long) pool.getNumberOfPendingRequests().get());
+
+			assertTrue(pool.containsAllocatedSlot(allocationId).get());
+
+			pool.releaseSlot(requestId, null, null).get();
+
+			assertFalse(pool.containsAllocatedSlot(allocationId).get());
 			assertTrue(pool.containsAvailableSlot(allocationId).get());
 		} finally {
 			RpcUtils.terminateRpcEndpoint(pool, timeout);
@@ -285,13 +296,14 @@ public class SlotPoolRpcTest extends TestLogger {
 	 * it will automatically call cancelSlotAllocation as will inject future.whenComplete in ProviderAndOwner.
 	 */
 	@Test
-	public void testProviderAndOwnerSlotAllocationTimeout() throws Exception {
+	public void testProviderAndOwner() throws Exception {
 		final JobID jid = new JobID();
 
 		final TestingSlotPool pool = new TestingSlotPool(
 			rpcService,
 			jid,
 			SystemClock.getInstance(),
+			Time.milliseconds(10L),
 			TestingUtils.infiniteTime(),
 			TestingUtils.infiniteTime());
 
@@ -305,18 +317,19 @@ public class SlotPoolRpcTest extends TestLogger {
 			ResourceManagerGateway resourceManagerGateway = new TestingResourceManagerGateway();
 			pool.connectToResourceManager(resourceManagerGateway);
 
+			ScheduledUnit mockScheduledUnit = new ScheduledUnit(SchedulerTestUtils.getDummyTask());
+
 			// test the pending request is clear when timed out
 			CompletableFuture<LogicalSlot> future = pool.getSlotProvider().allocateSlot(
-				new DummyScheduledUnit(),
+				mockScheduledUnit,
 				true,
-				SlotProfile.noRequirements(),
-				fastTimeout);
+				Collections.emptyList());
 
 			try {
 				future.get();
-				fail("We expected a TimeoutException.");
+				fail("We expected a AskTimeoutException.");
 			} catch (ExecutionException e) {
-				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof TimeoutException);
+				assertTrue(ExceptionUtils.stripExecutionException(e) instanceof AskTimeoutException);
 			}
 
 			// wait for the cancel call on the SlotPool
@@ -335,31 +348,26 @@ public class SlotPoolRpcTest extends TestLogger {
 
 		private volatile Consumer<SlotRequestId> releaseSlotConsumer;
 
-		private volatile Consumer<SlotRequestId> timeoutPendingSlotRequestConsumer;
-
 		public TestingSlotPool(
 				RpcService rpcService,
 				JobID jobId,
 				Clock clock,
-				Time rpcTimeout,
-				Time idleSlotTimeout) {
+				Time slotRequestTimeout,
+				Time resourceManagerAllocationTimeout,
+				Time resourceManagerRequestTimeout) {
 			super(
 				rpcService,
 				jobId,
 				clock,
-				rpcTimeout,
-				idleSlotTimeout);
+				slotRequestTimeout,
+				resourceManagerAllocationTimeout,
+				resourceManagerRequestTimeout);
 
 			releaseSlotConsumer = null;
-			timeoutPendingSlotRequestConsumer = null;
 		}
 
 		public void setReleaseSlotConsumer(Consumer<SlotRequestId> releaseSlotConsumer) {
 			this.releaseSlotConsumer = Preconditions.checkNotNull(releaseSlotConsumer);
-		}
-
-		public void setTimeoutPendingSlotRequestConsumer(Consumer<SlotRequestId> timeoutPendingSlotRequestConsumer) {
-			this.timeoutPendingSlotRequestConsumer = Preconditions.checkNotNull(timeoutPendingSlotRequestConsumer);
 		}
 
 		@Override
@@ -369,24 +377,11 @@ public class SlotPoolRpcTest extends TestLogger {
 			@Nullable Throwable cause) {
 			final Consumer<SlotRequestId> currentReleaseSlotConsumer = releaseSlotConsumer;
 
-			final CompletableFuture<Acknowledge> acknowledgeCompletableFuture = super.releaseSlot(slotRequestId, slotSharingGroupId, cause);
-
 			if (currentReleaseSlotConsumer != null) {
 				currentReleaseSlotConsumer.accept(slotRequestId);
 			}
 
-			return acknowledgeCompletableFuture;
-		}
-
-		@Override
-		protected void timeoutPendingSlotRequest(SlotRequestId slotRequestId) {
-			final Consumer<SlotRequestId> currentTimeoutPendingSlotRequestConsumer = timeoutPendingSlotRequestConsumer;
-
-			if (currentTimeoutPendingSlotRequestConsumer != null) {
-				currentTimeoutPendingSlotRequestConsumer.accept(slotRequestId);
-			}
-
-			super.timeoutPendingSlotRequest(slotRequestId);
+			return super.releaseSlot(slotRequestId, slotSharingGroupId, cause);
 		}
 
 		CompletableFuture<Boolean> containsAllocatedSlot(AllocationID allocationId) {

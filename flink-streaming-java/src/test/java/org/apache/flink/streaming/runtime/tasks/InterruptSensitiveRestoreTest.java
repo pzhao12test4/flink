@@ -30,7 +30,6 @@ import org.apache.flink.runtime.blob.TransientBlobCache;
 import org.apache.flink.runtime.broadcast.BroadcastVariableManager;
 import org.apache.flink.runtime.checkpoint.JobManagerTaskRestore;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
-import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.deployment.InputGateDeploymentDescriptor;
@@ -61,7 +60,6 @@ import org.apache.flink.runtime.state.KeyGroupRangeOffsets;
 import org.apache.flink.runtime.state.KeyGroupsStateHandle;
 import org.apache.flink.runtime.state.KeyedStateHandle;
 import org.apache.flink.runtime.state.OperatorStateHandle;
-import org.apache.flink.runtime.state.OperatorStreamStateHandle;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StreamStateHandle;
 import org.apache.flink.runtime.state.TestTaskStateManager;
@@ -199,7 +197,7 @@ public class InterruptSensitiveRestoreTest {
 		KeyGroupRangeOffsets keyGroupRangeOffsets = new KeyGroupRangeOffsets(new KeyGroupRange(0, 0));
 
 		Collection<OperatorStateHandle> operatorStateHandles =
-				Collections.singletonList(new OperatorStreamStateHandle(operatorStateMetadata, state));
+				Collections.singletonList(new OperatorStateHandle(operatorStateMetadata, state));
 
 		List<KeyedStateHandle> keyedStateHandles =
 				Collections.singletonList(new KeyGroupsStateHandle(keyGroupRangeOffsets, state));
@@ -222,10 +220,10 @@ public class InterruptSensitiveRestoreTest {
 		}
 
 		OperatorSubtaskState operatorSubtaskState = new OperatorSubtaskState(
-			new StateObjectCollection<>(operatorStateBackend),
-			new StateObjectCollection<>(operatorStateStream),
-			new StateObjectCollection<>(keyedStateFromBackend),
-			new StateObjectCollection<>(keyedStateFromStream));
+			operatorStateBackend,
+			operatorStateStream,
+			keyedStateFromBackend,
+			keyedStateFromStream);
 
 		JobVertexID jobVertexID = new JobVertexID();
 		OperatorID operatorID = OperatorID.fromJobVertexID(jobVertexID);
@@ -256,7 +254,7 @@ public class InterruptSensitiveRestoreTest {
 
 		TestTaskStateManager taskStateManager = new TestTaskStateManager();
 		taskStateManager.setReportedCheckpointId(taskRestore.getRestoreCheckpointId());
-		taskStateManager.setJobManagerTaskStateSnapshotsByCheckpointId(
+		taskStateManager.setTaskStateSnapshotsByCheckpointId(
 			Collections.singletonMap(
 				taskRestore.getRestoreCheckpointId(),
 				taskRestore.getTaskStateSnapshot()));

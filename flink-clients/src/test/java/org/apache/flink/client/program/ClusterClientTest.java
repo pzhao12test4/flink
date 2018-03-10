@@ -71,7 +71,7 @@ public class ClusterClientTest extends TestLogger {
 		Configuration config = new Configuration();
 		HighAvailabilityServices highAvailabilityServices = mock(HighAvailabilityServices.class);
 
-		StandaloneClusterClient clusterClient = new StandaloneClusterClient(config, highAvailabilityServices, false);
+		StandaloneClusterClient clusterClient = new StandaloneClusterClient(config, highAvailabilityServices);
 
 		clusterClient.shutdown();
 
@@ -333,7 +333,7 @@ public class ClusterClientTest extends TestLogger {
 		private final ActorGateway jobmanagerGateway;
 
 		TestClusterClient(Configuration config, ActorGateway jobmanagerGateway) throws Exception {
-			super(config, new TestingHighAvailabilityServices(), false);
+			super(config, new TestingHighAvailabilityServices());
 			this.jobmanagerGateway = jobmanagerGateway;
 		}
 

@@ -33,7 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
-import java.util.Optional;
 
 /**
  * The BarrierTracker keeps track of what checkpoint barriers have been received from
@@ -91,25 +90,20 @@ public class BarrierTracker implements CheckpointBarrierHandler {
 	@Override
 	public BufferOrEvent getNextNonBlocked() throws Exception {
 		while (true) {
-			Optional<BufferOrEvent> next = inputGate.getNextBufferOrEvent();
-			if (!next.isPresent()) {
+			BufferOrEvent next = inputGate.getNextBufferOrEvent();
+			if (next == null || next.isBuffer()) {
 				// buffer or input exhausted
-				return null;
+				return next;
 			}
-
-			BufferOrEvent bufferOrEvent = next.get();
-			if (bufferOrEvent.isBuffer()) {
-				return bufferOrEvent;
+			else if (next.getEvent().getClass() == CheckpointBarrier.class) {
+				processBarrier((CheckpointBarrier) next.getEvent(), next.getChannelIndex());
 			}
-			else if (bufferOrEvent.getEvent().getClass() == CheckpointBarrier.class) {
-				processBarrier((CheckpointBarrier) bufferOrEvent.getEvent(), bufferOrEvent.getChannelIndex());
-			}
-			else if (bufferOrEvent.getEvent().getClass() == CancelCheckpointMarker.class) {
-				processCheckpointAbortBarrier((CancelCheckpointMarker) bufferOrEvent.getEvent(), bufferOrEvent.getChannelIndex());
+			else if (next.getEvent().getClass() == CancelCheckpointMarker.class) {
+				processCheckpointAbortBarrier((CancelCheckpointMarker) next.getEvent(), next.getChannelIndex());
 			}
 			else {
 				// some other event
-				return bufferOrEvent;
+				return next;
 			}
 		}
 	}

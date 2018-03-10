@@ -20,7 +20,6 @@ package org.apache.flink.yarn;
 
 import org.apache.flink.client.cli.CliFrontend;
 import org.apache.flink.configuration.ConfigConstants;
-import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.SecurityOptions;
 import org.apache.flink.test.util.TestBaseUtils;
 import org.apache.flink.util.Preconditions;
@@ -55,8 +54,6 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.Marker;
 import org.slf4j.MarkerFactory;
 
-import javax.annotation.Nullable;
-
 import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -75,7 +72,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Pattern;
 
@@ -105,7 +101,7 @@ public abstract class YarnTestBase extends TestLogger {
 			"Started SelectChannelConnector@0.0.0.0:8081" // Jetty should start on a random port in YARN mode.
 	};
 
-	/** These strings are white-listed, overriding the prohibited strings. */
+	/** These strings are white-listed, overriding teh prohibited strings. */
 	protected static final String[] WHITELISTED_STRINGS = {
 		"akka.remote.RemoteTransportExceptionNoStackTrace",
 		// workaround for annoying InterruptedException logging:
@@ -131,7 +127,7 @@ public abstract class YarnTestBase extends TestLogger {
 	 */
 	protected static File flinkUberjar;
 
-	protected static final YarnConfiguration YARN_CONFIGURATION;
+	protected static final Configuration YARN_CONFIGURATION;
 
 	/**
 	 * lib/ folder of the flink distribution.
@@ -143,15 +139,9 @@ public abstract class YarnTestBase extends TestLogger {
 	 */
 	protected static File tempConfPathForSecureRun = null;
 
-	private YarnClient yarnClient = null;
-
-	protected org.apache.flink.configuration.Configuration flinkConfiguration;
-
-	protected boolean flip6;
-
 	static {
 		YARN_CONFIGURATION = new YarnConfiguration();
-		YARN_CONFIGURATION.setInt(YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB, 32);
+		YARN_CONFIGURATION.setInt(YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB, 512);
 		YARN_CONFIGURATION.setInt(YarnConfiguration.RM_SCHEDULER_MAXIMUM_ALLOCATION_MB, 4096); // 4096 is the available memory anyways
 		YARN_CONFIGURATION.setBoolean(YarnConfiguration.YARN_MINICLUSTER_FIXED_PORTS, true);
 		YARN_CONFIGURATION.setBoolean(YarnConfiguration.RM_SCHEDULER_INCLUDE_PORT_IN_NODE_NAME, true);
@@ -195,11 +185,14 @@ public abstract class YarnTestBase extends TestLogger {
 		}
 	}
 
+	private YarnClient yarnClient = null;
+	protected org.apache.flink.configuration.Configuration flinkConfiguration;
+
 	@Before
 	public void checkClusterEmpty() throws IOException, YarnException {
 		if (yarnClient == null) {
 			yarnClient = YarnClient.createYarnClient();
-			yarnClient.init(getYarnConfiguration());
+			yarnClient.init(YARN_CONFIGURATION);
 			yarnClient.start();
 		}
 
@@ -214,17 +207,6 @@ public abstract class YarnTestBase extends TestLogger {
 		}
 
 		flinkConfiguration = new org.apache.flink.configuration.Configuration();
-
-		flip6 = CoreOptions.FLIP6_MODE.equalsIgnoreCase(flinkConfiguration.getString(CoreOptions.MODE));
-	}
-
-	@Nullable
-	protected YarnClient getYarnClient() {
-		return yarnClient;
-	}
-
-	protected static YarnConfiguration getYarnConfiguration() {
-		return YARN_CONFIGURATION;
 	}
 
 	/**
@@ -415,15 +397,15 @@ public abstract class YarnTestBase extends TestLogger {
 		return count;
 	}
 
-	public static void startYARNSecureMode(YarnConfiguration conf, String principal, String keytab) {
+	public static void startYARNSecureMode(Configuration conf, String principal, String keytab) {
 		start(conf, principal, keytab);
 	}
 
-	public static void startYARNWithConfig(YarnConfiguration conf) {
+	public static void startYARNWithConfig(Configuration conf) {
 		start(conf, null, null);
 	}
 
-	private static void start(YarnConfiguration conf, String principal, String keytab) {
+	private static void start(Configuration conf, String principal, String keytab) {
 		// set the home directory to a temp directory. Flink on YARN is using the home dir to distribute the file
 		File homeDir = null;
 		try {
@@ -450,12 +432,7 @@ public abstract class YarnTestBase extends TestLogger {
 		try {
 			LOG.info("Starting up MiniYARNCluster");
 			if (yarnCluster == null) {
-				final String testName = conf.get(YarnTestBase.TEST_CLUSTER_NAME_KEY);
-				yarnCluster = new MiniYARNCluster(
-					testName == null ? "YarnTest_" + UUID.randomUUID() : testName,
-					NUM_NODEMANAGERS,
-					1,
-					1);
+				yarnCluster = new MiniYARNCluster(conf.get(YarnTestBase.TEST_CLUSTER_NAME_KEY), NUM_NODEMANAGERS, 1, 1);
 
 				yarnCluster.init(conf);
 				yarnCluster.start();

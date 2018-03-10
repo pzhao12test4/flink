@@ -37,11 +37,8 @@ import org.apache.flink.runtime.checkpoint.CheckpointRecoveryFactory;
 import org.apache.flink.runtime.checkpoint.CheckpointRetentionPolicy;
 import org.apache.flink.runtime.checkpoint.CompletedCheckpointStore;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
-import org.apache.flink.runtime.checkpoint.PrioritizedOperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.StandaloneCheckpointIDCounter;
-import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
-import org.apache.flink.runtime.checkpoint.TestingCheckpointRecoveryFactory;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.execution.librarycache.BlobLibraryCacheManager;
@@ -64,13 +61,12 @@ import org.apache.flink.runtime.jobgraph.tasks.JobCheckpointingSettings;
 import org.apache.flink.runtime.jobmanager.scheduler.Scheduler;
 import org.apache.flink.runtime.leaderelection.LeaderElectionService;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
-import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.leaderelection.TestingLeaderRetrievalService;
 import org.apache.flink.runtime.messages.JobManagerMessages;
 import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
 import org.apache.flink.runtime.metrics.groups.JobManagerMetricGroup;
 import org.apache.flink.runtime.metrics.groups.UnregisteredMetricGroups;
 import org.apache.flink.runtime.state.OperatorStateHandle;
-import org.apache.flink.runtime.state.OperatorStreamStateHandle;
 import org.apache.flink.runtime.state.TaskStateManager;
 import org.apache.flink.runtime.state.memory.ByteStreamStateHandle;
 import org.apache.flink.runtime.taskmanager.TaskManager;
@@ -82,6 +78,7 @@ import org.apache.flink.runtime.testingUtils.TestingTaskManagerMessages;
 import org.apache.flink.runtime.testingUtils.TestingUtils;
 import org.apache.flink.runtime.testutils.InMemorySubmittedJobGraphStore;
 import org.apache.flink.runtime.testutils.RecoverableCompletedCheckpointStore;
+import org.apache.flink.runtime.util.TestByteStreamStateHandleDeepCompare;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.TestLogger;
@@ -97,7 +94,6 @@ import akka.pattern.Patterns;
 import akka.testkit.CallingThreadDispatcher;
 import akka.testkit.JavaTestKit;
 import org.junit.AfterClass;
-import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -108,7 +104,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -182,9 +177,9 @@ public class JobManagerHARecoveryTest extends TestLogger {
 			submittedJobGraphStore.start(null);
 			CompletedCheckpointStore checkpointStore = new RecoverableCompletedCheckpointStore();
 			CheckpointIDCounter checkpointCounter = new StandaloneCheckpointIDCounter();
-			CheckpointRecoveryFactory checkpointStateFactory = new TestingCheckpointRecoveryFactory(checkpointStore, checkpointCounter);
+			CheckpointRecoveryFactory checkpointStateFactory = new MyCheckpointRecoveryFactory(checkpointStore, checkpointCounter);
 			TestingLeaderElectionService myLeaderElectionService = new TestingLeaderElectionService();
-			SettableLeaderRetrievalService myLeaderRetrievalService = new SettableLeaderRetrievalService(
+			TestingLeaderRetrievalService myLeaderRetrievalService = new TestingLeaderRetrievalService(
 				null,
 				null);
 			TestingHighAvailabilityServices testingHighAvailabilityServices = new TestingHighAvailabilityServices();
@@ -470,6 +465,27 @@ public class JobManagerHARecoveryTest extends TestLogger {
 		}
 	}
 
+	static class MyCheckpointRecoveryFactory implements CheckpointRecoveryFactory {
+
+		private final CompletedCheckpointStore store;
+		private final CheckpointIDCounter counter;
+
+		public MyCheckpointRecoveryFactory(CompletedCheckpointStore store, CheckpointIDCounter counter) {
+			this.store = store;
+			this.counter = counter;
+		}
+
+		@Override
+		public CompletedCheckpointStore createCheckpointStore(JobID jobId, int maxNumberOfCheckpointsToRetain, ClassLoader userClassLoader) throws Exception {
+			return store;
+		}
+
+		@Override
+		public CheckpointIDCounter createCheckpointIDCounter(JobID jobId) throws Exception {
+			return counter;
+		}
+	}
+
 	public static class BlockingInvokable extends AbstractInvokable {
 
 		private static final OneShotLatch LATCH = new OneShotLatch();
@@ -483,21 +499,17 @@ public class JobManagerHARecoveryTest extends TestLogger {
 
 			OperatorID operatorID = OperatorID.fromJobVertexID(getEnvironment().getJobVertexId());
 			TaskStateManager taskStateManager = getEnvironment().getTaskStateManager();
-			PrioritizedOperatorSubtaskState subtaskState = taskStateManager.prioritizedOperatorState(operatorID);
+			OperatorSubtaskState subtaskState = taskStateManager.operatorStates(operatorID);
 
-			int subtaskIndex = getIndexInSubtaskGroup();
-			if (subtaskIndex < BlockingStatefulInvokable.recoveredStates.length) {
-				Iterator<OperatorStateHandle> iterator =
-					subtaskState.getJobManagerManagedOperatorState().iterator();
-
-				if (iterator.hasNext()) {
-					OperatorStateHandle operatorStateHandle = iterator.next();
+			if(subtaskState != null) {
+				int subtaskIndex = getIndexInSubtaskGroup();
+				if (subtaskIndex < BlockingStatefulInvokable.recoveredStates.length) {
+					OperatorStateHandle operatorStateHandle = subtaskState.getManagedOperatorState().iterator().next();
 					try (FSDataInputStream in = operatorStateHandle.openInputStream()) {
 						BlockingStatefulInvokable.recoveredStates[subtaskIndex] =
 							InstantiationUtil.deserializeObject(in, getUserCodeClassLoader());
 					}
 				}
-				Assert.assertFalse(iterator.hasNext());
 			}
 
 			LATCH.await();
@@ -524,7 +536,7 @@ public class JobManagerHARecoveryTest extends TestLogger {
 
 		@Override
 		public boolean triggerCheckpoint(CheckpointMetaData checkpointMetaData, CheckpointOptions checkpointOptions) throws Exception {
-			ByteStreamStateHandle byteStreamStateHandle = new ByteStreamStateHandle(
+			ByteStreamStateHandle byteStreamStateHandle = new TestByteStreamStateHandleDeepCompare(
 					String.valueOf(UUID.randomUUID()),
 					InstantiationUtil.serializeObject(checkpointMetaData.getCheckpointId()));
 
@@ -533,16 +545,16 @@ public class JobManagerHARecoveryTest extends TestLogger {
 				"test-state",
 				new OperatorStateHandle.StateMetaInfo(new long[]{0L}, OperatorStateHandle.Mode.SPLIT_DISTRIBUTE));
 
-			OperatorStateHandle operatorStateHandle = new OperatorStreamStateHandle(stateNameToPartitionOffsets, byteStreamStateHandle);
+			OperatorStateHandle operatorStateHandle = new OperatorStateHandle(stateNameToPartitionOffsets, byteStreamStateHandle);
 
 			TaskStateSnapshot checkpointStateHandles = new TaskStateSnapshot();
 			checkpointStateHandles.putSubtaskStateByOperatorID(
 				OperatorID.fromJobVertexID(getEnvironment().getJobVertexId()),
 				new OperatorSubtaskState(
-					StateObjectCollection.singleton(operatorStateHandle),
-					StateObjectCollection.empty(),
-					StateObjectCollection.empty(),
-					StateObjectCollection.empty()));
+					Collections.singletonList(operatorStateHandle),
+					Collections.emptyList(),
+					Collections.emptyList(),
+					Collections.emptyList()));
 
 			getEnvironment().acknowledgeCheckpoint(
 					checkpointMetaData.getCheckpointId(),

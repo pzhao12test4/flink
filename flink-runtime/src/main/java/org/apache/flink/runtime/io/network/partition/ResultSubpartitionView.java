@@ -43,7 +43,7 @@ public interface ResultSubpartitionView {
 	@Nullable
 	BufferAndBacklog getNextBuffer() throws IOException, InterruptedException;
 
-	void notifyDataAvailable();
+	void notifyBuffersAvailable(long buffers) throws IOException;
 
 	void releaseAllResources() throws IOException;
 
@@ -52,11 +52,4 @@ public interface ResultSubpartitionView {
 	boolean isReleased();
 
 	Throwable getFailureCause();
-
-	/**
-	 * Returns whether the next buffer is an event or not.
-	 */
-	boolean nextBufferIsEvent();
-
-	boolean isAvailable();
 }

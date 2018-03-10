@@ -310,18 +310,16 @@ public class PipelinedRegionFailoverConcurrencyTest extends TestLogger {
 			"test job");
 
 		// build a simple execution graph with on job vertex, parallelism 2
-		final Time timeout = Time.seconds(10L);
 		final ExecutionGraph graph = new ExecutionGraph(
 			jobInformation,
 			TestingUtils.defaultExecutor(),
 			TestingUtils.defaultExecutor(),
-			timeout,
+			Time.seconds(10),
 			restartStrategy,
 			failoverStrategy,
 			slotProvider,
 			getClass().getClassLoader(),
-			VoidBlobWriter.getInstance(),
-			timeout);
+			VoidBlobWriter.getInstance());
 
 		JobVertex jv = new JobVertex("test vertex");
 		jv.setInvokableClass(NoOpInvokable.class);

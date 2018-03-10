@@ -22,7 +22,6 @@ import org.apache.flink.api.common.JobID;
 import org.apache.flink.runtime.execution.CancelTaskException;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.io.network.TaskEventDispatcher;
-import org.apache.flink.runtime.io.network.buffer.BufferBuilder;
 import org.apache.flink.runtime.io.network.buffer.BufferPool;
 import org.apache.flink.runtime.io.network.buffer.BufferProvider;
 import org.apache.flink.runtime.io.network.buffer.NetworkBufferPool;
@@ -49,10 +48,8 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.Callable;
@@ -62,9 +59,7 @@ import java.util.concurrent.Future;
 
 import scala.Tuple2;
 
-import static org.apache.flink.util.FutureUtil.waitForAll;
 import static org.apache.flink.util.Preconditions.checkArgument;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 import static org.mockito.Matchers.any;
 import static org.mockito.Matchers.anyInt;
@@ -175,7 +170,10 @@ public class LocalInputChannelTest {
 						partitionIds)));
 			}
 
-			waitForAll(60_000L, results);
+			// Wait for all to finish
+			for (Future<?> result : results) {
+				result.get();
+			}
 		}
 		finally {
 			networkBuffers.destroyAllBufferPools();
@@ -362,9 +360,9 @@ public class LocalInputChannelTest {
 		ResultPartitionManager partitionManager = mock(ResultPartitionManager.class);
 
 		when(partitionManager.createSubpartitionView(
-			any(ResultPartitionID.class),
-			anyInt(),
-			any(BufferAvailabilityListener.class))).thenReturn(reader);
+				any(ResultPartitionID.class),
+				anyInt(),
+				any(BufferAvailabilityListener.class))).thenReturn(reader);
 
 		LocalInputChannel channel = new LocalInputChannel(
 			gate,
@@ -380,7 +378,11 @@ public class LocalInputChannelTest {
 		when(reader.getNextBuffer()).thenReturn(null);
 		when(reader.isReleased()).thenReturn(false);
 
-		assertFalse(channel.getNextBuffer().isPresent());
+		try {
+			channel.getNextBuffer();
+			fail("Did not throw expected IllegalStateException");
+		} catch (IllegalStateException ignored) {
+		}
 
 		// Null buffer and released
 		when(reader.getNextBuffer()).thenReturn(null);
@@ -391,9 +393,6 @@ public class LocalInputChannelTest {
 			fail("Did not throw expected CancelTaskException");
 		} catch (CancelTaskException ignored) {
 		}
-
-		channel.releaseAllResources();
-		assertFalse(channel.getNextBuffer().isPresent());
 	}
 
 	// ---------------------------------------------------------------------------------------------
@@ -445,13 +444,11 @@ public class LocalInputChannelTest {
 		}
 
 		@Override
-		public BufferConsumerAndChannel getNextBufferConsumer() throws Exception {
+		public BufferOrEvent getNextBufferOrEvent() throws Exception {
 			if (channelIndexes.size() > 0) {
 				final int channelIndex = channelIndexes.remove(0);
-				BufferBuilder bufferBuilder = bufferProvider.requestBufferBuilderBlocking();
-				bufferBuilder.appendAndCommit(ByteBuffer.wrap(new byte[4]));
-				bufferBuilder.finish();
-				return new BufferConsumerAndChannel(bufferBuilder.createBufferConsumer(), channelIndex);
+
+				return new BufferOrEvent(bufferProvider.requestBufferBlocking(), channelIndex);
 			}
 
 			return null;
@@ -518,17 +515,17 @@ public class LocalInputChannelTest {
 			final int[] numberOfBuffersPerChannel = new int[numberOfInputChannels];
 
 			try {
-				Optional<BufferOrEvent> boe;
-				while ((boe = inputGate.getNextBufferOrEvent()).isPresent()) {
-					if (boe.get().isBuffer()) {
-						boe.get().getBuffer().recycleBuffer();
+				BufferOrEvent boe;
+				while ((boe = inputGate.getNextBufferOrEvent()) != null) {
+					if (boe.isBuffer()) {
+						boe.getBuffer().recycleBuffer();
 
 						// Check that we don't receive too many buffers
-						if (++numberOfBuffersPerChannel[boe.get().getChannelIndex()]
+						if (++numberOfBuffersPerChannel[boe.getChannelIndex()]
 								> numberOfExpectedBuffersPerChannel) {
 
 							throw new IllegalStateException("Received more buffers than expected " +
-									"on channel " + boe.get().getChannelIndex() + ".");
+									"on channel " + boe.getChannelIndex() + ".");
 						}
 					}
 				}

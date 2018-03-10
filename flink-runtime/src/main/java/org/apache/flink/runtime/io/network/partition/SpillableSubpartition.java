@@ -25,13 +25,13 @@ import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.io.network.api.EndOfPartitionEvent;
 import org.apache.flink.runtime.io.network.api.serialization.EventSerializer;
 import org.apache.flink.runtime.io.network.buffer.Buffer;
-import org.apache.flink.runtime.io.network.buffer.BufferConsumer;
 import org.apache.flink.runtime.io.network.buffer.BufferPool;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.concurrent.GuardedBy;
 import java.io.IOException;
+import java.util.ArrayDeque;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -62,13 +62,16 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  *
  * <p>Note on thread safety. Synchronizing on {@code buffers} is used to synchronize
  * writes and reads. Synchronizing on {@code this} is used against concurrent
- * {@link #add(BufferConsumer)} and clean ups {@link #release()} / {@link #finish()} which
+ * {@link #add(Buffer)} and clean ups {@link #release()} / {@link #finish()} which
  * also are touching {@code spillWriter}. Since we do not want to block reads during
  * spilling, we need those two synchronization. Probably this model could be simplified.
  */
 class SpillableSubpartition extends ResultSubpartition {
 
 	private static final Logger LOG = LoggerFactory.getLogger(SpillableSubpartition.class);
+
+	/** Buffers are kept in this queue as long as we weren't ask to release any. */
+	private final ArrayDeque<Buffer> buffers = new ArrayDeque<>();
 
 	/** The I/O manager used for spilling buffers to disk. */
 	private final IOManager ioManager;
@@ -82,6 +85,10 @@ class SpillableSubpartition extends ResultSubpartition {
 	/** Flag indicating whether the subpartition has been released. */
 	private volatile boolean isReleased;
 
+	/** The number of non-event buffers currently in this subpartition */
+	@GuardedBy("buffers")
+	private int buffersInBacklog;
+
 	/** The read view to consume this subpartition. */
 	private ResultSubpartitionView readView;
 
@@ -92,46 +99,49 @@ class SpillableSubpartition extends ResultSubpartition {
 	}
 
 	@Override
-	public synchronized boolean add(BufferConsumer bufferConsumer) throws IOException {
-		checkNotNull(bufferConsumer);
+	public synchronized boolean add(Buffer buffer) throws IOException {
+		checkNotNull(buffer);
 
 		synchronized (buffers) {
 			if (isFinished || isReleased) {
-				bufferConsumer.close();
+				buffer.recycleBuffer();
 				return false;
 			}
 
-			buffers.add(bufferConsumer);
-			// The number of buffers are needed later when creating
-			// the read views. If you ever remove this line here,
-			// make sure to still count the number of buffers.
-			updateStatistics(bufferConsumer);
-			increaseBuffersInBacklog(bufferConsumer);
+			if (spillWriter == null) {
+				buffers.add(buffer);
+				// The number of buffers are needed later when creating
+				// the read views. If you ever remove this line here,
+				// make sure to still count the number of buffers.
+				updateStatistics(buffer);
+				increaseBuffersInBacklog(buffer);
 
-			if (spillWriter != null) {
-				spillFinishedBufferConsumers();
+				return true;
 			}
 		}
+
+		// Didn't return early => go to disk
+		try {
+			// retain buffer for updateStatistics() below
+			spillWriter.writeBlock(buffer.retainBuffer());
+			synchronized (buffers) {
+				// See the note above, but only do this if the buffer was correctly added!
+				updateStatistics(buffer);
+				increaseBuffersInBacklog(buffer);
+			}
+		} finally {
+			buffer.recycleBuffer();
+		}
+
 		return true;
-	}
-
-	@Override
-	public void flush() {
-		synchronized (buffers) {
-			if (readView != null) {
-				readView.notifyDataAvailable();
-			}
-		}
 	}
 
 	@Override
 	public synchronized void finish() throws IOException {
 		synchronized (buffers) {
-			if (add(EventSerializer.toBufferConsumer(EndOfPartitionEvent.INSTANCE))) {
+			if (add(EventSerializer.toBuffer(EndOfPartitionEvent.INSTANCE))) {
 				isFinished = true;
 			}
-
-			flush();
 		}
 
 		// If we are spilling/have spilled, wait for the writer to finish
@@ -151,8 +161,8 @@ class SpillableSubpartition extends ResultSubpartition {
 			}
 
 			// Release all available buffers
-			for (BufferConsumer buffer : buffers) {
-				buffer.close();
+			for (Buffer buffer : buffers) {
+				buffer.recycleBuffer();
 			}
 			buffers.clear();
 
@@ -209,6 +219,7 @@ class SpillableSubpartition extends ResultSubpartition {
 					parent.getBufferProvider().getMemorySegmentSize(),
 					availabilityListener);
 			}
+
 			return readView;
 		}
 	}
@@ -228,11 +239,18 @@ class SpillableSubpartition extends ResultSubpartition {
 				spillWriter = ioManager.createBufferFileWriter(ioManager.createChannel());
 
 				int numberOfBuffers = buffers.size();
-				long spilledBytes = spillFinishedBufferConsumers();
+				long spilledBytes = 0;
+
+				// Spill all buffers
+				for (int i = 0; i < numberOfBuffers; i++) {
+					Buffer buffer = buffers.remove();
+					spilledBytes += buffer.getSize();
+					spillWriter.writeBlock(buffer);
+				}
 
 				LOG.debug("Spilling {} bytes for sub partition {} of {}.", spilledBytes, index, parent.getPartitionId());
 
-				return numberOfBuffers - buffers.size();
+				return numberOfBuffers;
 			}
 		}
 
@@ -240,31 +258,42 @@ class SpillableSubpartition extends ResultSubpartition {
 		return 0;
 	}
 
-	@VisibleForTesting
-	protected long spillFinishedBufferConsumers() throws IOException {
-		long spilledBytes = 0;
-
-		while (!buffers.isEmpty()) {
-			BufferConsumer bufferConsumer = buffers.peek();
-			Buffer buffer = bufferConsumer.build();
-			updateStatistics(buffer);
-			spilledBytes += buffer.getSize();
-			spillWriter.writeBlock(buffer);
-
-			if (bufferConsumer.isFinished()) {
-				bufferConsumer.close();
-				buffers.poll();
-			}
-			else {
-				return spilledBytes;
-			}
-		}
-		return spilledBytes;
-	}
-
 	@Override
 	public boolean isReleased() {
 		return isReleased;
+	}
+
+	@Override
+	@VisibleForTesting
+	public int getBuffersInBacklog() {
+		return buffersInBacklog;
+	}
+
+	/**
+	 * Decreases the number of non-event buffers by one after fetching a non-event
+	 * buffer from this subpartition (for access by the subpartition views).
+	 *
+	 * @return backlog after the operation
+	 */
+	public int decreaseBuffersInBacklog(Buffer buffer) {
+		synchronized (buffers) {
+			if (buffer != null && buffer.isBuffer()) {
+				buffersInBacklog--;
+			}
+			return buffersInBacklog;
+		}
+	}
+
+	/**
+	 * Increases the number of non-event buffers by one after adding a non-event
+	 * buffer into this subpartition.
+	 */
+	private void increaseBuffersInBacklog(Buffer buffer) {
+		assert Thread.holdsLock(buffers);
+
+		if (buffer != null && buffer.isBuffer()) {
+			buffersInBacklog++;
+		}
 	}
 
 	@Override
@@ -278,7 +307,7 @@ class SpillableSubpartition extends ResultSubpartition {
 		return String.format("SpillableSubpartition [%d number of buffers (%d bytes)," +
 				"%d number of buffers in backlog, finished? %s, read view? %s, spilled? %s]",
 			getTotalNumberOfBuffers(), getTotalNumberOfBytes(),
-			getBuffersInBacklog(), isFinished, readView != null, spillWriter != null);
+			buffersInBacklog, isFinished, readView != null, spillWriter != null);
 	}
 
 }

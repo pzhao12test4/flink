@@ -43,7 +43,6 @@ import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameter
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.concurrent.ScheduledExecutor;
-import org.apache.flink.runtime.entrypoint.ClusterInformation;
 import org.apache.flink.runtime.heartbeat.HeartbeatServices;
 import org.apache.flink.runtime.heartbeat.TestingHeartbeatServices;
 import org.apache.flink.runtime.highavailability.HighAvailabilityServices;
@@ -53,7 +52,7 @@ import org.apache.flink.runtime.jobmaster.JobMasterGateway;
 import org.apache.flink.runtime.jobmaster.JobMasterId;
 import org.apache.flink.runtime.jobmaster.JobMasterRegistrationSuccess;
 import org.apache.flink.runtime.leaderelection.TestingLeaderElectionService;
-import org.apache.flink.runtime.leaderretrieval.SettableLeaderRetrievalService;
+import org.apache.flink.runtime.leaderelection.TestingLeaderRetrievalService;
 import org.apache.flink.runtime.metrics.MetricRegistry;
 import org.apache.flink.runtime.metrics.MetricRegistryImpl;
 import org.apache.flink.runtime.registration.RegistrationResponse;
@@ -173,23 +172,10 @@ public class MesosResourceManagerTest extends TestLogger {
 			MesosConfiguration mesosConfig,
 			MesosTaskManagerParameters taskManagerParameters,
 			ContainerSpecification taskManagerContainerSpec) {
-			super(
-				rpcService,
-				resourceManagerEndpointId,
-				resourceId,
-				resourceManagerConfiguration,
-				highAvailabilityServices,
-				heartbeatServices,
-				slotManager,
-				metricRegistry,
-				jobLeaderIdService,
-				new ClusterInformation("localhost", 1234),
-				fatalErrorHandler,
-				flinkConfig,
-				mesosServices,
-				mesosConfig,
-				taskManagerParameters,
-				taskManagerContainerSpec);
+			super(rpcService, resourceManagerEndpointId, resourceId, resourceManagerConfiguration,
+				highAvailabilityServices, heartbeatServices, slotManager, metricRegistry,
+				jobLeaderIdService, fatalErrorHandler, flinkConfig, mesosServices, mesosConfig,
+				taskManagerParameters, taskManagerContainerSpec);
 		}
 
 		@Override
@@ -412,7 +398,7 @@ public class MesosResourceManagerTest extends TestLogger {
 			public final String address;
 			public final JobMasterGateway gateway;
 			public final JobMasterId jobMasterId;
-			public final SettableLeaderRetrievalService leaderRetrievalService;
+			public final TestingLeaderRetrievalService leaderRetrievalService;
 
 			MockJobMaster(JobID jobID) {
 				this.jobID = jobID;
@@ -420,7 +406,7 @@ public class MesosResourceManagerTest extends TestLogger {
 				this.address = "/" + jobID;
 				this.gateway = mock(JobMasterGateway.class);
 				this.jobMasterId = JobMasterId.generate();
-				this.leaderRetrievalService = new SettableLeaderRetrievalService(this.address, this.jobMasterId.toUUID());
+				this.leaderRetrievalService = new TestingLeaderRetrievalService(this.address, this.jobMasterId.toUUID());
 			}
 		}
 
@@ -510,7 +496,7 @@ public class MesosResourceManagerTest extends TestLogger {
 
 		@Override
 		public void close() throws Exception {
-			rpcService.stopService().get();
+			rpcService.stopService();
 		}
 	}
 

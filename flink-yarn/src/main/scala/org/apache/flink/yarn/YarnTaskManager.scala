@@ -24,12 +24,8 @@ import org.apache.flink.runtime.io.disk.iomanager.IOManager
 import org.apache.flink.runtime.io.network.NetworkEnvironment
 import org.apache.flink.runtime.memory.MemoryManager
 import org.apache.flink.runtime.metrics.groups.TaskManagerMetricGroup
-import org.apache.flink.runtime.security.SecurityUtils
-import org.apache.flink.runtime.state.TaskExecutorLocalStateStoresManager
 import org.apache.flink.runtime.taskexecutor.TaskManagerConfiguration
 import org.apache.flink.runtime.taskmanager.{TaskManager, TaskManagerLocation}
-
-import grizzled.slf4j.Logger
 
 /** An extension of the TaskManager that listens for additional YARN related
   * messages.
@@ -41,7 +37,6 @@ class YarnTaskManager(
     memoryManager: MemoryManager,
     ioManager: IOManager,
     network: NetworkEnvironment,
-    taskManagerLocalStateStoresManager: TaskExecutorLocalStateStoresManager,
     numberOfSlots: Int,
     highAvailabilityServices: HighAvailabilityServices,
     taskManagerMetricGroup: TaskManagerMetricGroup)
@@ -52,7 +47,6 @@ class YarnTaskManager(
     memoryManager,
     ioManager,
     network,
-    taskManagerLocalStateStoresManager,
     numberOfSlots,
     highAvailabilityServices,
     taskManagerMetricGroup) {
@@ -62,25 +56,13 @@ class YarnTaskManager(
   }
 }
 
-object YarnTaskManager {
-
-  val LOG = Logger(classOf[TaskManager])
-
-  /** Entry point (main method) to run the TaskManager on YARN.
-    *
-    * @param args The command line arguments.
-    */
-  def main(args: Array[String]): Unit = {
-    val tmRunner = YarnTaskManagerRunnerFactory.create(
-      args, classOf[YarnTaskManager], System.getenv())
-
-    try {
-      SecurityUtils.getInstalledContext.runSecured(tmRunner)
-    } catch {
-      case e: Exception =>
-        LOG.error("Exception occurred while launching Task Manager runner", e)
-        throw new RuntimeException(e)
+  object YarnTaskManager {
+    /** Entry point (main method) to run the TaskManager on YARN.
+      *
+      * @param args The command line arguments.
+      */
+    def main(args: Array[String]): Unit = {
+      YarnTaskManagerRunner.runYarnTaskManager(args, classOf[YarnTaskManager])
     }
-  }
 
 }

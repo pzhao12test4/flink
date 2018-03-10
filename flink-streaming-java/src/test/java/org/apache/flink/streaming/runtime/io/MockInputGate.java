@@ -26,7 +26,6 @@ import org.apache.flink.runtime.io.network.partition.consumer.InputGateListener;
 
 import java.util.ArrayDeque;
 import java.util.List;
-import java.util.Optional;
 import java.util.Queue;
 
 /**
@@ -38,16 +37,16 @@ public class MockInputGate implements InputGate {
 
 	private final int numChannels;
 
-	private final Queue<BufferOrEvent> bufferOrEvents;
+	private final Queue<BufferOrEvent> boes;
 
 	private final boolean[] closed;
 
 	private int closedChannels;
 
-	public MockInputGate(int pageSize, int numChannels, List<BufferOrEvent> bufferOrEvents) {
+	public MockInputGate(int pageSize, int numChannels, List<BufferOrEvent> boes) {
 		this.pageSize = pageSize;
 		this.numChannels = numChannels;
-		this.bufferOrEvents = new ArrayDeque<BufferOrEvent>(bufferOrEvents);
+		this.boes = new ArrayDeque<BufferOrEvent>(boes);
 		this.closed = new boolean[numChannels];
 	}
 
@@ -63,14 +62,14 @@ public class MockInputGate implements InputGate {
 
 	@Override
 	public boolean isFinished() {
-		return bufferOrEvents.isEmpty();
+		return boes.isEmpty();
 	}
 
 	@Override
-	public Optional<BufferOrEvent> getNextBufferOrEvent() {
-		BufferOrEvent next = bufferOrEvents.poll();
+	public BufferOrEvent getNextBufferOrEvent() {
+		BufferOrEvent next = boes.poll();
 		if (next == null) {
-			return Optional.empty();
+			return null;
 		}
 
 		int channelIdx = next.getChannelIndex();
@@ -82,12 +81,7 @@ public class MockInputGate implements InputGate {
 			closed[channelIdx] = true;
 			closedChannels++;
 		}
-		return Optional.of(next);
-	}
-
-	@Override
-	public Optional<BufferOrEvent> pollNextBufferOrEvent() {
-		return getNextBufferOrEvent();
+		return next;
 	}
 
 	@Override

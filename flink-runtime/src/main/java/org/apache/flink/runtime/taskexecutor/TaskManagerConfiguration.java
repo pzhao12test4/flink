@@ -20,6 +20,7 @@ package org.apache.flink.runtime.taskexecutor;
 
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.AkkaOptions;
+import org.apache.flink.configuration.BlobServerOptions;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ConfigurationUtils;
@@ -33,8 +34,6 @@ import org.apache.flink.util.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.annotation.Nullable;
 
 import scala.concurrent.duration.Duration;
 
@@ -64,12 +63,6 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 
 	private final String[] alwaysParentFirstLoaderPatterns;
 
-	@Nullable
-	private final String taskManagerLogPath;
-
-	@Nullable
-	private final String taskManagerStdoutPath;
-
 	public TaskManagerConfiguration(
 		int numberSlots,
 		String[] tmpDirectories,
@@ -78,12 +71,11 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 		Time initialRegistrationPause,
 		Time maxRegistrationPause,
 		Time refusedRegistrationPause,
+		long cleanupInterval,
 		Configuration configuration,
 		boolean exitJvmOnOutOfMemory,
 		FlinkUserCodeClassLoaders.ResolveOrder classLoaderResolveOrder,
-		String[] alwaysParentFirstLoaderPatterns,
-		@Nullable String taskManagerLogPath,
-		@Nullable String taskManagerStdoutPath) {
+		String[] alwaysParentFirstLoaderPatterns) {
 
 		this.numberSlots = numberSlots;
 		this.tmpDirectories = Preconditions.checkNotNull(tmpDirectories);
@@ -96,8 +88,6 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 		this.exitJvmOnOutOfMemory = exitJvmOnOutOfMemory;
 		this.classLoaderResolveOrder = classLoaderResolveOrder;
 		this.alwaysParentFirstLoaderPatterns = alwaysParentFirstLoaderPatterns;
-		this.taskManagerLogPath = taskManagerLogPath;
-		this.taskManagerStdoutPath = taskManagerStdoutPath;
 	}
 
 	public int getNumberSlots() {
@@ -147,16 +137,6 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 		return alwaysParentFirstLoaderPatterns;
 	}
 
-	@Nullable
-	public String getTaskManagerLogPath() {
-		return taskManagerLogPath;
-	}
-
-	@Nullable
-	public String getTaskManagerStdoutPath() {
-		return taskManagerStdoutPath;
-	}
-
 	// --------------------------------------------------------------------------------------------
 	//  Static factory methods
 	// --------------------------------------------------------------------------------------------
@@ -182,10 +162,14 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 
 		LOG.info("Messages have a max timeout of " + timeout);
 
+		final long cleanupInterval = configuration.getLong(BlobServerOptions.CLEANUP_INTERVAL) * 1000;
+
 		final Time finiteRegistrationDuration;
 
 		try {
-			Duration maxRegistrationDuration = Duration.create(configuration.getString(TaskManagerOptions.MAX_REGISTRATION_DURATION));
+			Duration maxRegistrationDuration = Duration.create(configuration.getString(
+				ConfigConstants.TASK_MANAGER_MAX_REGISTRATION_DURATION,
+				ConfigConstants.DEFAULT_TASK_MANAGER_MAX_REGISTRATION_DURATION));
 			if (maxRegistrationDuration.isFinite()) {
 				finiteRegistrationDuration = Time.milliseconds(maxRegistrationDuration.toMillis());
 			} else {
@@ -193,12 +177,14 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 			}
 		} catch (NumberFormatException e) {
 			throw new IllegalArgumentException("Invalid format for parameter " +
-				TaskManagerOptions.MAX_REGISTRATION_DURATION.key(), e);
+				ConfigConstants.TASK_MANAGER_MAX_REGISTRATION_DURATION, e);
 		}
 
 		final Time initialRegistrationPause;
 		try {
-			Duration pause = Duration.create(configuration.getString(TaskManagerOptions.INITIAL_REGISTRATION_PAUSE));
+			Duration pause = Duration.create(configuration.getString(
+				ConfigConstants.TASK_MANAGER_INITIAL_REGISTRATION_PAUSE,
+				ConfigConstants.DEFAULT_TASK_MANAGER_INITIAL_REGISTRATION_PAUSE));
 			if (pause.isFinite()) {
 				initialRegistrationPause = Time.milliseconds(pause.toMillis());
 			} else {
@@ -206,13 +192,14 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 			}
 		} catch (NumberFormatException e) {
 			throw new IllegalArgumentException("Invalid format for parameter " +
-				TaskManagerOptions.INITIAL_REGISTRATION_PAUSE.key(), e);
+				ConfigConstants.TASK_MANAGER_INITIAL_REGISTRATION_PAUSE, e);
 		}
 
 		final Time maxRegistrationPause;
 		try {
 			Duration pause = Duration.create(configuration.getString(
-				TaskManagerOptions.MAX_REGISTRATION_PAUSE));
+				ConfigConstants.TASK_MANAGER_MAX_REGISTARTION_PAUSE,
+				ConfigConstants.DEFAULT_TASK_MANAGER_MAX_REGISTRATION_PAUSE));
 			if (pause.isFinite()) {
 				maxRegistrationPause = Time.milliseconds(pause.toMillis());
 			} else {
@@ -220,12 +207,14 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 			}
 		} catch (NumberFormatException e) {
 			throw new IllegalArgumentException("Invalid format for parameter " +
-				TaskManagerOptions.INITIAL_REGISTRATION_PAUSE.key(), e);
+				ConfigConstants.TASK_MANAGER_INITIAL_REGISTRATION_PAUSE, e);
 		}
 
 		final Time refusedRegistrationPause;
 		try {
-			Duration pause = Duration.create(configuration.getString(TaskManagerOptions.REFUSED_REGISTRATION_PAUSE));
+			Duration pause = Duration.create(configuration.getString(
+				ConfigConstants.TASK_MANAGER_REFUSED_REGISTRATION_PAUSE,
+				ConfigConstants.DEFAULT_TASK_MANAGER_REFUSED_REGISTRATION_PAUSE));
 			if (pause.isFinite()) {
 				refusedRegistrationPause = Time.milliseconds(pause.toMillis());
 			} else {
@@ -233,7 +222,7 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 			}
 		} catch (NumberFormatException e) {
 			throw new IllegalArgumentException("Invalid format for parameter " +
-				TaskManagerOptions.INITIAL_REGISTRATION_PAUSE.key(), e);
+				ConfigConstants.TASK_MANAGER_INITIAL_REGISTRATION_PAUSE, e);
 		}
 
 		final boolean exitOnOom = configuration.getBoolean(TaskManagerOptions.KILL_ON_OUT_OF_MEMORY);
@@ -241,22 +230,9 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 		final String classLoaderResolveOrder =
 			configuration.getString(CoreOptions.CLASSLOADER_RESOLVE_ORDER);
 
-		final String[] alwaysParentFirstLoaderPatterns = CoreOptions.getParentFirstLoaderPatterns(configuration);
-
-		final String taskManagerLogPath = configuration.getString(ConfigConstants.TASK_MANAGER_LOG_PATH_KEY, System.getProperty("log.file"));
-		final String taskManagerStdoutPath;
-
-		if (taskManagerLogPath != null) {
-			final int extension = taskManagerLogPath.lastIndexOf('.');
-
-			if (extension > 0) {
-				taskManagerStdoutPath = taskManagerLogPath.substring(0, extension) + ".out";
-			} else {
-				taskManagerStdoutPath = null;
-			}
-		} else {
-			taskManagerStdoutPath = null;
-		}
+		final String alwaysParentFirstLoaderString =
+			configuration.getString(CoreOptions.ALWAYS_PARENT_FIRST_LOADER);
+		final String[] alwaysParentFirstLoaderPatterns = alwaysParentFirstLoaderString.split(";");
 
 		return new TaskManagerConfiguration(
 			numberSlots,
@@ -266,11 +242,10 @@ public class TaskManagerConfiguration implements TaskManagerRuntimeInfo {
 			initialRegistrationPause,
 			maxRegistrationPause,
 			refusedRegistrationPause,
+			cleanupInterval,
 			configuration,
 			exitOnOom,
 			FlinkUserCodeClassLoaders.ResolveOrder.fromString(classLoaderResolveOrder),
-			alwaysParentFirstLoaderPatterns,
-			taskManagerLogPath,
-			taskManagerStdoutPath);
+			alwaysParentFirstLoaderPatterns);
 	}
 }

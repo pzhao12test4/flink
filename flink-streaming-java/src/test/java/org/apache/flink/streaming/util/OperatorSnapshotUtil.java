@@ -18,11 +18,10 @@
 
 package org.apache.flink.streaming.util;
 
-import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
-import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.checkpoint.savepoint.SavepointV1Serializer;
 import org.apache.flink.runtime.state.KeyedStateHandle;
 import org.apache.flink.runtime.state.OperatorStateHandle;
+import org.apache.flink.streaming.runtime.tasks.OperatorStateHandles;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -35,7 +34,7 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * Util for writing/reading {@link OperatorSubtaskState},
+ * Util for writing/reading {@link org.apache.flink.streaming.runtime.tasks.OperatorStateHandles},
  * for use in tests.
  */
 public class OperatorSnapshotUtil {
@@ -46,13 +45,12 @@ public class OperatorSnapshotUtil {
 		return resource.getFile();
 	}
 
-	public static void writeStateHandle(OperatorSubtaskState state, String path) throws IOException {
+	public static void writeStateHandle(OperatorStateHandles state, String path) throws IOException {
 		FileOutputStream out = new FileOutputStream(path);
 
 		try (DataOutputStream dos = new DataOutputStream(out)) {
 
-			// required for backwards compatibility.
-			dos.writeInt(0);
+			dos.writeInt(state.getOperatorChainIndex());
 
 			// still required for compatibility
 			SavepointV1Serializer.serializeStreamStateHandle(null, dos);
@@ -105,12 +103,10 @@ public class OperatorSnapshotUtil {
 		}
 	}
 
-	public static OperatorSubtaskState readStateHandle(String path) throws IOException, ClassNotFoundException {
+	public static OperatorStateHandles readStateHandle(String path) throws IOException, ClassNotFoundException {
 		FileInputStream in = new FileInputStream(path);
 		try (DataInputStream dis = new DataInputStream(in)) {
-
-			// required for backwards compatibility.
-			dis.readInt();
+			int index = dis.readInt();
 
 			// still required for compatibility to consume the bytes.
 			SavepointV1Serializer.deserializeStreamStateHandle(dis);
@@ -159,11 +155,12 @@ public class OperatorSnapshotUtil {
 				}
 			}
 
-			return new OperatorSubtaskState(
-				new StateObjectCollection<>(managedOperatorState),
-				new StateObjectCollection<>(rawOperatorState),
-				new StateObjectCollection<>(managedKeyedState),
-				new StateObjectCollection<>(rawKeyedState));
+			return new OperatorStateHandles(
+				index,
+				managedKeyedState,
+				rawKeyedState,
+				managedOperatorState,
+				rawOperatorState);
 		}
 	}
 }

@@ -32,7 +32,7 @@ import org.apache.flink.streaming.api.functions.ProcessFunction
 import org.apache.flink.streaming.api.functions.windowing.{AllWindowFunction, WindowFunction}
 import org.apache.flink.streaming.api.windowing.windows.{Window => DataStreamWindow}
 import org.apache.flink.table.api.dataview.DataViewSpec
-import org.apache.flink.table.api.{StreamQueryConfig, TableConfig, TableException}
+import org.apache.flink.table.api.{StreamQueryConfig, TableException}
 import org.apache.flink.table.calcite.FlinkRelBuilder.NamedWindowProperty
 import org.apache.flink.table.calcite.FlinkTypeFactory
 import org.apache.flink.table.codegen.AggregationCodeGenerator
@@ -78,7 +78,6 @@ object AggregateUtil {
       inputTypeInfo: TypeInformation[Row],
       inputFieldTypeInfo: Seq[TypeInformation[_]],
       queryConfig: StreamQueryConfig,
-      tableConfig: TableConfig,
       rowTimeIdx: Option[Int],
       isPartitioned: Boolean,
       isRowsClause: Boolean)
@@ -89,7 +88,6 @@ object AggregateUtil {
         namedAggregates.map(_.getKey),
         aggregateInputType,
         needRetraction = false,
-        tableConfig,
         isStateBackedDataViews = true)
 
     val aggregationStateType: RowTypeInfo = new RowTypeInfo(accTypes: _*)
@@ -161,7 +159,6 @@ object AggregateUtil {
       inputFieldTypes: Seq[TypeInformation[_]],
       groupings: Array[Int],
       queryConfig: StreamQueryConfig,
-      tableConfig: TableConfig,
       generateRetraction: Boolean,
       consumeRetraction: Boolean): ProcessFunction[CRow, CRow] = {
 
@@ -170,7 +167,6 @@ object AggregateUtil {
         namedAggregates.map(_.getKey),
         inputRowType,
         consumeRetraction,
-        tableConfig,
         isStateBackedDataViews = true)
 
     val aggMapping = aggregates.indices.map(_ + groupings.length).toArray
@@ -227,7 +223,6 @@ object AggregateUtil {
       inputFieldTypeInfo: Seq[TypeInformation[_]],
       precedingOffset: Long,
       queryConfig: StreamQueryConfig,
-      tableConfig: TableConfig,
       isRowsClause: Boolean,
       rowTimeIdx: Option[Int])
     : ProcessFunction[CRow, CRow] = {
@@ -238,7 +233,6 @@ object AggregateUtil {
         namedAggregates.map(_.getKey),
         aggregateInputType,
         needRetract,
-        tableConfig,
         isStateBackedDataViews = true)
 
     val aggregationStateType: RowTypeInfo = new RowTypeInfo(accTypes: _*)
@@ -331,16 +325,14 @@ object AggregateUtil {
     groupings: Array[Int],
     inputType: RelDataType,
     inputFieldTypeInfo: Seq[TypeInformation[_]],
-    isParserCaseSensitive: Boolean,
-    tableConfig: TableConfig)
+    isParserCaseSensitive: Boolean)
   : MapFunction[Row, Row] = {
 
     val needRetract = false
     val (aggFieldIndexes, aggregates, accTypes, _) = transformToAggregateFunctions(
       namedAggregates.map(_.getKey),
       inputType,
-      needRetract,
-      tableConfig)
+      needRetract)
 
     val mapReturnType: RowTypeInfo =
       createRowTypeForKeysAndAggregates(
@@ -438,16 +430,14 @@ object AggregateUtil {
       groupings: Array[Int],
       physicalInputRowType: RelDataType,
       physicalInputTypes: Seq[TypeInformation[_]],
-      isParserCaseSensitive: Boolean,
-      tableConfig: TableConfig)
+      isParserCaseSensitive: Boolean)
     : RichGroupReduceFunction[Row, Row] = {
 
     val needRetract = false
     val (aggFieldIndexes, aggregates, accTypes, _) = transformToAggregateFunctions(
       namedAggregates.map(_.getKey),
       physicalInputRowType,
-      needRetract,
-      tableConfig)
+      needRetract)
 
     val returnType: RowTypeInfo = createRowTypeForKeysAndAggregates(
       groupings,
@@ -553,7 +543,6 @@ object AggregateUtil {
       outputType: RelDataType,
       groupings: Array[Int],
       properties: Seq[NamedWindowProperty],
-      tableConfig: TableConfig,
       isInputCombined: Boolean = false)
     : RichGroupReduceFunction[Row, Row] = {
 
@@ -561,8 +550,7 @@ object AggregateUtil {
     val (aggFieldIndexes, aggregates, _, _) = transformToAggregateFunctions(
       namedAggregates.map(_.getKey),
       physicalInputRowType,
-      needRetract,
-      tableConfig)
+      needRetract)
 
     val aggMapping = aggregates.indices.toArray.map(_ + groupings.length)
 
@@ -707,15 +695,13 @@ object AggregateUtil {
     namedAggregates: Seq[CalcitePair[AggregateCall, String]],
     physicalInputRowType: RelDataType,
     physicalInputTypes: Seq[TypeInformation[_]],
-    groupings: Array[Int],
-    tableConfig: TableConfig): MapPartitionFunction[Row, Row] = {
+    groupings: Array[Int]): MapPartitionFunction[Row, Row] = {
 
     val needRetract = false
     val (aggFieldIndexes, aggregates, accTypes, _) = transformToAggregateFunctions(
       namedAggregates.map(_.getKey),
       physicalInputRowType,
-      needRetract,
-      tableConfig)
+      needRetract)
 
     val aggMapping = aggregates.indices.map(_ + groupings.length).toArray
 
@@ -781,16 +767,14 @@ object AggregateUtil {
       namedAggregates: Seq[CalcitePair[AggregateCall, String]],
       physicalInputRowType: RelDataType,
       physicalInputTypes: Seq[TypeInformation[_]],
-      groupings: Array[Int],
-      tableConfig: TableConfig)
+      groupings: Array[Int])
     : GroupCombineFunction[Row, Row] = {
 
     val needRetract = false
     val (aggFieldIndexes, aggregates, accTypes, _) = transformToAggregateFunctions(
       namedAggregates.map(_.getKey),
       physicalInputRowType,
-      needRetract,
-      tableConfig)
+      needRetract)
 
     val aggMapping = aggregates.indices.map(_ + groupings.length).toArray
 
@@ -847,8 +831,7 @@ object AggregateUtil {
       inputType: RelDataType,
       inputFieldTypeInfo: Seq[TypeInformation[_]],
       outputType: RelDataType,
-      groupings: Array[Int],
-      tableConfig: TableConfig): (
+      groupings: Array[Int]): (
         Option[DataSetPreAggFunction],
         Option[TypeInformation[Row]],
         Either[DataSetAggFunction, DataSetFinalAggFunction]) = {
@@ -857,8 +840,7 @@ object AggregateUtil {
     val (aggInFields, aggregates, accTypes, _) = transformToAggregateFunctions(
       namedAggregates.map(_.getKey),
       inputType,
-      needRetract,
-      tableConfig)
+      needRetract)
 
     val (gkeyOutMapping, aggOutMapping) = getOutputMappings(
       namedAggregates,
@@ -1010,8 +992,7 @@ object AggregateUtil {
       inputFieldTypeInfo: Seq[TypeInformation[_]],
       outputType: RelDataType,
       groupingKeys: Array[Int],
-      needMerge: Boolean,
-      tableConfig: TableConfig)
+      needMerge: Boolean)
     : (DataStreamAggFunction[CRow, Row, Row], RowTypeInfo, RowTypeInfo) = {
 
     val needRetract = false
@@ -1019,8 +1000,7 @@ object AggregateUtil {
       transformToAggregateFunctions(
         namedAggregates.map(_.getKey),
         inputType,
-        needRetract,
-        tableConfig)
+        needRetract)
 
     val aggMapping = aggregates.indices.toArray
     val outputArity = aggregates.length
@@ -1056,14 +1036,12 @@ object AggregateUtil {
   private[flink] def doAllSupportPartialMerge(
     aggregateCalls: Seq[AggregateCall],
     inputType: RelDataType,
-    groupKeysCount: Int,
-    tableConfig: TableConfig): Boolean = {
+    groupKeysCount: Int): Boolean = {
 
     val aggregateList = transformToAggregateFunctions(
       aggregateCalls,
       inputType,
-      needRetraction = false,
-      tableConfig)._2
+      needRetraction = false)._2
 
     doAllSupportPartialMerge(aggregateList)
   }
@@ -1143,7 +1121,6 @@ object AggregateUtil {
       aggregateCalls: Seq[AggregateCall],
       aggregateInputType: RelDataType,
       needRetraction: Boolean,
-      tableConfig: TableConfig,
       isStateBackedDataViews: Boolean = false)
   : (Array[Array[Int]],
     Array[TableAggregateFunction[_, _]],
@@ -1274,7 +1251,7 @@ object AggregateUtil {
               case DOUBLE =>
                 new DoubleAvgAggFunction
               case DECIMAL =>
-                new DecimalAvgAggFunction(tableConfig.getDecimalContext)
+                new DecimalAvgAggFunction
               case sqlType: SqlTypeName =>
                 throw new TableException(s"Avg aggregate does no support type: '$sqlType'")
             }

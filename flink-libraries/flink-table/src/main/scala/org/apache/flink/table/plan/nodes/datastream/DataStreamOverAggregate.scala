@@ -28,7 +28,7 @@ import org.apache.calcite.rel.{RelNode, RelWriter, SingleRel}
 import org.apache.calcite.rex.RexLiteral
 import org.apache.flink.api.java.functions.NullByteKeySelector
 import org.apache.flink.streaming.api.datastream.DataStream
-import org.apache.flink.table.api.{StreamQueryConfig, StreamTableEnvironment, TableConfig, TableException}
+import org.apache.flink.table.api.{StreamQueryConfig, StreamTableEnvironment, TableException}
 import org.apache.flink.table.calcite.FlinkTypeFactory
 import org.apache.flink.table.codegen.AggregationCodeGenerator
 import org.apache.flink.table.plan.nodes.OverAggregate
@@ -172,7 +172,6 @@ class DataStreamOverAggregate(
       // unbounded OVER window
       createUnboundedAndCurrentRowOverWindow(
         queryConfig,
-        tableEnv.getConfig,
         generator,
         inputDS,
         rowTimeIdx,
@@ -189,8 +188,7 @@ class DataStreamOverAggregate(
         inputDS,
         rowTimeIdx,
         aggregateInputType,
-        isRowsClause = overWindow.isRows,
-        tableEnv.getConfig)
+        isRowsClause = overWindow.isRows)
     } else {
       throw new TableException("OVER RANGE FOLLOWING windows are not supported yet.")
     }
@@ -198,7 +196,6 @@ class DataStreamOverAggregate(
 
   def createUnboundedAndCurrentRowOverWindow(
     queryConfig: StreamQueryConfig,
-    tableConfig: TableConfig,
     generator: AggregationCodeGenerator,
     inputDS: DataStream[CRow],
     rowTimeIdx: Option[Int],
@@ -222,7 +219,6 @@ class DataStreamOverAggregate(
       inputSchema.typeInfo,
       inputSchema.fieldTypeInfos,
       queryConfig,
-      tableConfig,
       rowTimeIdx,
       partitionKeys.nonEmpty,
       isRowsClause)
@@ -253,8 +249,7 @@ class DataStreamOverAggregate(
     inputDS: DataStream[CRow],
     rowTimeIdx: Option[Int],
     aggregateInputType: RelDataType,
-    isRowsClause: Boolean,
-    tableConfig: TableConfig): DataStream[CRow] = {
+    isRowsClause: Boolean): DataStream[CRow] = {
 
     val overWindow: Group = logicWindow.groups.get(0)
 
@@ -277,7 +272,6 @@ class DataStreamOverAggregate(
       inputSchema.fieldTypeInfos,
       precedingOffset,
       queryConfig,
-      tableConfig,
       isRowsClause,
       rowTimeIdx
     )

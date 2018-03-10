@@ -23,9 +23,10 @@ import org.apache.flink.runtime.JobException;
 import org.apache.flink.runtime.concurrent.Executors;
 import org.apache.flink.runtime.jobgraph.JobVertex;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
-
 import org.junit.Assert;
 import org.junit.Test;
+
+import java.io.IOException;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -61,14 +62,9 @@ public class ExecutionJobVertexTest {
 		} catch (IllegalArgumentException ignore) {
 		}
 
-		// parallelism must be smaller than the max parallelism
-		try {
-			createExecutionJobVertex(172, 4);
-			Assert.fail("We should not be able to create an ExecutionJobVertex which " +
-				"has a smaller max parallelism than parallelism.");
-		} catch (JobException ignored) {
-			// expected
-		}
+		// test configured / trumps computed default
+		executionJobVertex = createExecutionJobVertex(172, 4);
+		Assert.assertEquals(4, executionJobVertex.getMaxParallelism());
 
 
 		// test configured / trumps computed default
@@ -124,7 +120,7 @@ public class ExecutionJobVertexTest {
 
 	private static ExecutionJobVertex createExecutionJobVertex(
 			int parallelism,
-			int preconfiguredMaxParallelism) throws JobException {
+			int preconfiguredMaxParallelism) throws JobException, IOException {
 
 		JobVertex jobVertex = new JobVertex("testVertex");
 		jobVertex.setInvokableClass(AbstractInvokable.class);

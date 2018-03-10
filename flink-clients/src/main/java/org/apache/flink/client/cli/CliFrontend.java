@@ -28,7 +28,6 @@ import org.apache.flink.client.deployment.ClusterDescriptor;
 import org.apache.flink.client.deployment.ClusterSpecification;
 import org.apache.flink.client.program.ClusterClient;
 import org.apache.flink.client.program.PackagedProgram;
-import org.apache.flink.client.program.PackagedProgramUtils;
 import org.apache.flink.client.program.ProgramInvocationException;
 import org.apache.flink.client.program.ProgramMissingJobException;
 import org.apache.flink.client.program.ProgramParametrizationException;
@@ -48,7 +47,6 @@ import org.apache.flink.optimizer.plandump.PlanJSONDumpGenerator;
 import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.client.JobStatusMessage;
 import org.apache.flink.runtime.concurrent.FutureUtils;
-import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobStatus;
 import org.apache.flink.runtime.messages.Acknowledge;
 import org.apache.flink.runtime.messages.JobManagerMessages;
@@ -84,9 +82,6 @@ import java.util.concurrent.TimeUnit;
 
 import scala.concurrent.duration.FiniteDuration;
 
-import static org.apache.flink.client.cli.CliFrontendParser.HELP_OPTION;
-import static org.apache.flink.client.cli.CliFrontendParser.MODIFY_PARALLELISM_OPTION;
-
 /**
  * Implementation of a simple command line frontend for executing programs.
  */
@@ -101,7 +96,6 @@ public class CliFrontend {
 	private static final String ACTION_CANCEL = "cancel";
 	private static final String ACTION_STOP = "stop";
 	private static final String ACTION_SAVEPOINT = "savepoint";
-	private static final String ACTION_MODIFY = "modify";
 
 	// configuration dir parameters
 	private static final String CONFIG_DIRECTORY_FALLBACK_1 = "../conf";
@@ -118,8 +112,6 @@ public class CliFrontend {
 	private final FiniteDuration clientTimeout;
 
 	private final int defaultParallelism;
-
-	private final boolean flip6;
 
 	public CliFrontend(
 			Configuration configuration,
@@ -143,8 +135,6 @@ public class CliFrontend {
 
 		this.clientTimeout = AkkaUtils.getClientTimeout(this.configuration);
 		this.defaultParallelism = configuration.getInteger(CoreOptions.DEFAULT_PARALLELISM);
-
-		this.flip6 = CoreOptions.FLIP6_MODE.equalsIgnoreCase(configuration.getString(CoreOptions.MODE));
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -205,11 +195,7 @@ public class CliFrontend {
 
 		final CustomCommandLine<?> customCommandLine = getActiveCustomCommandLine(commandLine);
 
-		try {
-			runProgram(customCommandLine, commandLine, runOptions, program);
-		} finally {
-			program.deleteExtractedLibraries();
-		}
+		runProgram(customCommandLine, commandLine, runOptions, program);
 	}
 
 	private <T> void runProgram(
@@ -224,72 +210,51 @@ public class CliFrontend {
 
 			final ClusterClient<T> client;
 
-			// directly deploy the job if the cluster is started in job mode and detached
-			if (flip6 && clusterId == null && runOptions.getDetachedMode()) {
-				int parallelism = runOptions.getParallelism() == -1 ? defaultParallelism : runOptions.getParallelism();
-
-				final JobGraph jobGraph = PackagedProgramUtils.createJobGraph(program, configuration, parallelism);
-
+			if (clusterId != null) {
+				client = clusterDescriptor.retrieve(clusterId);
+			} else {
 				final ClusterSpecification clusterSpecification = customCommandLine.getClusterSpecification(commandLine);
-				client = clusterDescriptor.deployJobCluster(
-					clusterSpecification,
-					jobGraph,
-					runOptions.getDetachedMode());
+				client = clusterDescriptor.deploySessionCluster(clusterSpecification);
+			}
 
-				logAndSysout("Job has been submitted with JobID " + jobGraph.getJobID());
+			try {
+				client.setPrintStatusDuringExecution(runOptions.getStdoutLogging());
+				client.setDetached(runOptions.getDetachedMode());
+				LOG.debug("Client slots is set to {}", client.getMaxSlots());
+
+				LOG.debug(runOptions.getSavepointRestoreSettings().toString());
+
+				int userParallelism = runOptions.getParallelism();
+				LOG.debug("User parallelism is set to {}", userParallelism);
+				if (client.getMaxSlots() != -1 && userParallelism == -1) {
+					logAndSysout("Using the parallelism provided by the remote cluster ("
+						+ client.getMaxSlots() + "). "
+						+ "To use another parallelism, set it at the ./bin/flink client.");
+					userParallelism = client.getMaxSlots();
+				} else if (ExecutionConfig.PARALLELISM_DEFAULT == userParallelism) {
+					userParallelism = defaultParallelism;
+				}
+
+				executeProgram(program, client, userParallelism);
+			} finally {
+				if (clusterId == null && !client.isDetached()) {
+					// terminate the cluster only if we have started it before and if it's not detached
+					try {
+						clusterDescriptor.terminateCluster(client.getClusterId());
+					} catch (FlinkException e) {
+						LOG.info("Could not properly terminate the Flink cluster.", e);
+					}
+				}
 
 				try {
 					client.shutdown();
 				} catch (Exception e) {
 					LOG.info("Could not properly shut down the client.", e);
 				}
-			} else {
-				if (clusterId != null) {
-					client = clusterDescriptor.retrieve(clusterId);
-				} else {
-					// also in job mode we have to deploy a session cluster because the job
-					// might consist of multiple parts (e.g. when using collect)
-					final ClusterSpecification clusterSpecification = customCommandLine.getClusterSpecification(commandLine);
-					client = clusterDescriptor.deploySessionCluster(clusterSpecification);
-				}
-
-				try {
-					client.setPrintStatusDuringExecution(runOptions.getStdoutLogging());
-					client.setDetached(runOptions.getDetachedMode());
-					LOG.debug("Client slots is set to {}", client.getMaxSlots());
-
-					LOG.debug("{}", runOptions.getSavepointRestoreSettings());
-
-					int userParallelism = runOptions.getParallelism();
-					LOG.debug("User parallelism is set to {}", userParallelism);
-					if (client.getMaxSlots() != -1 && userParallelism == -1) {
-						logAndSysout("Using the parallelism provided by the remote cluster ("
-							+ client.getMaxSlots() + "). "
-							+ "To use another parallelism, set it at the ./bin/flink client.");
-						userParallelism = client.getMaxSlots();
-					} else if (ExecutionConfig.PARALLELISM_DEFAULT == userParallelism) {
-						userParallelism = defaultParallelism;
-					}
-
-					executeProgram(program, client, userParallelism);
-				} finally {
-					if (clusterId == null && !client.isDetached()) {
-						// terminate the cluster only if we have started it before and if it's not detached
-						try {
-							clusterDescriptor.terminateCluster(client.getClusterId());
-						} catch (FlinkException e) {
-							LOG.info("Could not properly terminate the Flink cluster.", e);
-						}
-					}
-
-					try {
-						client.shutdown();
-					} catch (Exception e) {
-						LOG.info("Could not properly shut down the client.", e);
-					}
-				}
 			}
 		} finally {
+			program.deleteExtractedLibraries();
+
 			try {
 				clusterDescriptor.close();
 			} catch (Exception e) {
@@ -718,58 +683,6 @@ public class CliFrontend {
 		logAndSysout("Savepoint '" + savepointPath + "' disposed.");
 	}
 
-	protected void modify(String[] args) throws CliArgsException, FlinkException {
-		LOG.info("Running 'modify' command.");
-
-		final Options commandOptions = CliFrontendParser.getModifyOptions();
-
-		final Options commandLineOptions = CliFrontendParser.mergeOptions(commandOptions, customCommandLineOptions);
-
-		final CommandLine commandLine = CliFrontendParser.parse(commandLineOptions, args, false);
-
-		if (commandLine.hasOption(HELP_OPTION.getOpt())) {
-			CliFrontendParser.printHelpForModify(customCommandLines);
-		}
-
-		final JobID jobId;
-		final String[] modifyArgs = commandLine.getArgs();
-
-		if (modifyArgs.length > 0) {
-			jobId = parseJobId(modifyArgs[0]);
-		} else {
-			throw new CliArgsException("Missing JobId");
-		}
-
-		final int newParallelism;
-		if (commandLine.hasOption(MODIFY_PARALLELISM_OPTION.getOpt())) {
-			try {
-				newParallelism = Integer.parseInt(commandLine.getOptionValue(MODIFY_PARALLELISM_OPTION.getOpt()));
-			} catch (NumberFormatException e) {
-				throw new CliArgsException("Could not parse the parallelism which is supposed to be an integer.", e);
-			}
-		} else {
-			throw new CliArgsException("Missing new parallelism.");
-		}
-
-		final CustomCommandLine<?> activeCommandLine = getActiveCustomCommandLine(commandLine);
-
-		logAndSysout("Modify job " + jobId + '.');
-		runClusterAction(
-			activeCommandLine,
-			commandLine,
-			clusterClient -> {
-				CompletableFuture<Acknowledge> rescaleFuture = clusterClient.rescaleJob(jobId, newParallelism);
-
-				try {
-					rescaleFuture.get();
-				} catch (Exception e) {
-					throw new FlinkException("Could not rescale job " + jobId + '.', ExceptionUtils.stripExecutionException(e));
-				}
-				logAndSysout("Rescaled job " + jobId + ". Its new parallelism is " + newParallelism + '.');
-			}
-		);
-	}
-
 	// --------------------------------------------------------------------------------------------
 	//  Interaction with programs and JobManager
 	// --------------------------------------------------------------------------------------------
@@ -973,7 +886,7 @@ public class CliFrontend {
 	 * Internal interface to encapsulate cluster actions which are executed via
 	 * the {@link ClusterClient}.
 	 *
-	 * @param <T> type of the cluster id
+	 * @param <T> tyoe pf the cluster id
 	 */
 	@FunctionalInterface
 	private interface ClusterAction<T> {
@@ -1032,9 +945,6 @@ public class CliFrontend {
 					return 0;
 				case ACTION_SAVEPOINT:
 					savepoint(params);
-					return 0;
-				case ACTION_MODIFY:
-					modify(params);
 					return 0;
 				case "-h":
 				case "--help":
@@ -1158,15 +1068,12 @@ public class CliFrontend {
 					configurationDirectory,
 					"y",
 					"yarn"));
-		} catch (NoClassDefFoundError | Exception e) {
+		} catch (Exception e) {
 			LOG.warn("Could not load CLI class {}.", flinkYarnSessionCLI, e);
 		}
 
-		if (configuration.getString(CoreOptions.MODE).equalsIgnoreCase(CoreOptions.FLIP6_MODE)) {
-			customCommandLines.add(new Flip6DefaultCLI(configuration));
-		} else {
-			customCommandLines.add(new DefaultCLI(configuration));
-		}
+		customCommandLines.add(new Flip6DefaultCLI(configuration));
+		customCommandLines.add(new DefaultCLI(configuration));
 
 		return customCommandLines;
 	}

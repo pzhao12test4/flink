@@ -26,11 +26,8 @@ import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.TestLogger;
 
 import org.junit.Test;
+import org.mockito.invocation.InvocationOnMock;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -41,19 +38,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.Matchers.arrayContaining;
-import static org.hamcrest.Matchers.emptyArray;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.anyBoolean;
+import static org.mockito.Matchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * Tests for the utility methods in {@link FutureUtils}.
@@ -177,10 +175,8 @@ public class FutureUtilsTest extends TestLogger {
 	@Test
 	public void testRetryWithDelay() throws Exception {
 		final int retries = 4;
-		final Time delay = Time.milliseconds(5L);
+		final Time delay = Time.milliseconds(50L);
 		final AtomicInteger countDown = new AtomicInteger(retries);
-
-		long start = System.currentTimeMillis();
 
 		CompletableFuture<Boolean> retryFuture = FutureUtils.retryWithDelay(
 			() -> {
@@ -193,6 +189,8 @@ public class FutureUtilsTest extends TestLogger {
 			retries,
 			delay,
 			TestingUtils.defaultScheduledExecutor());
+
+		long start = System.currentTimeMillis();
 
 		Boolean result = retryFuture.get();
 
@@ -207,28 +205,29 @@ public class FutureUtilsTest extends TestLogger {
 	 */
 	@Test
 	public void testRetryWithDelayCancellation() {
-		final ManuallyTriggeredScheduledExecutor scheduledExecutor = new ManuallyTriggeredScheduledExecutor();
+		ScheduledFuture<?> scheduledFutureMock = mock(ScheduledFuture.class);
+		ScheduledExecutor scheduledExecutorMock = mock(ScheduledExecutor.class);
+		doReturn(scheduledFutureMock).when(scheduledExecutorMock).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+		doAnswer(
+			(InvocationOnMock invocation) -> {
+				invocation.getArgumentAt(0, Runnable.class).run();
+				return null;
+			}).when(scheduledExecutorMock).execute(any(Runnable.class));
 
 		CompletableFuture<?> retryFuture = FutureUtils.retryWithDelay(
 			() -> FutureUtils.completedExceptionally(new FlinkException("Test exception")),
 			1,
 			TestingUtils.infiniteTime(),
-			scheduledExecutor);
+			scheduledExecutorMock);
 
 		assertFalse(retryFuture.isDone());
 
-		final Collection<ScheduledFuture<?>> scheduledTasks = scheduledExecutor.getScheduledTasks();
-
-		assertFalse(scheduledTasks.isEmpty());
-
-		final ScheduledFuture<?> scheduledFuture = scheduledTasks.iterator().next();
-
-		assertFalse(scheduledFuture.isDone());
+		verify(scheduledExecutorMock).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
 
 		retryFuture.cancel(false);
 
 		assertTrue(retryFuture.isCancelled());
-		assertTrue(scheduledFuture.isCancelled());
+		verify(scheduledFutureMock).cancel(anyBoolean());
 	}
 
 	/**
@@ -277,185 +276,6 @@ public class FutureUtilsTest extends TestLogger {
 			assertThat(e.getMessage(), containsString("Could not complete the operation"));
 		} finally {
 			retryExecutor.shutdownNow();
-		}
-	}
-
-	@Test
-	public void testRunAfterwards() throws Exception {
-		final CompletableFuture<Void> inputFuture = new CompletableFuture<>();
-		final OneShotLatch runnableLatch = new OneShotLatch();
-
-		final CompletableFuture<Void> runFuture = FutureUtils.runAfterwards(
-			inputFuture,
-			runnableLatch::trigger);
-
-		assertThat(runnableLatch.isTriggered(), is(false));
-		assertThat(runFuture.isDone(), is(false));
-
-		inputFuture.complete(null);
-
-		assertThat(runnableLatch.isTriggered(), is(true));
-		assertThat(runFuture.isDone(), is(true));
-
-		// check that this future is not exceptionally completed
-		runFuture.get();
-	}
-
-	@Test
-	public void testRunAfterwardsExceptional() throws Exception {
-		final CompletableFuture<Void> inputFuture = new CompletableFuture<>();
-		final OneShotLatch runnableLatch = new OneShotLatch();
-		final FlinkException testException = new FlinkException("Test exception");
-
-		final CompletableFuture<Void> runFuture = FutureUtils.runAfterwards(
-			inputFuture,
-			runnableLatch::trigger);
-
-		assertThat(runnableLatch.isTriggered(), is(false));
-		assertThat(runFuture.isDone(), is(false));
-
-		inputFuture.completeExceptionally(testException);
-
-		assertThat(runnableLatch.isTriggered(), is(true));
-		assertThat(runFuture.isDone(), is(true));
-
-		try {
-			runFuture.get();
-			fail("Expected an exceptional completion");
-		} catch (ExecutionException ee) {
-			assertThat(ExceptionUtils.stripExecutionException(ee), is(testException));
-		}
-	}
-
-	@Test
-	public void testCompleteAll() throws Exception {
-		final CompletableFuture<String> inputFuture1 = new CompletableFuture<>();
-		final CompletableFuture<Integer> inputFuture2 = new CompletableFuture<>();
-
-		final List<CompletableFuture<?>> futuresToComplete = Arrays.asList(inputFuture1, inputFuture2);
-		final FutureUtils.ConjunctFuture<Void> completeFuture = FutureUtils.completeAll(futuresToComplete);
-
-		assertThat(completeFuture.isDone(), is(false));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(0));
-		assertThat(completeFuture.getNumFuturesTotal(), is(futuresToComplete.size()));
-
-		inputFuture2.complete(42);
-
-		assertThat(completeFuture.isDone(), is(false));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(1));
-
-		inputFuture1.complete("foobar");
-
-		assertThat(completeFuture.isDone(), is(true));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(2));
-
-		completeFuture.get();
-	}
-
-	@Test
-	public void testCompleteAllPartialExceptional() throws Exception {
-		final CompletableFuture<String> inputFuture1 = new CompletableFuture<>();
-		final CompletableFuture<Integer> inputFuture2 = new CompletableFuture<>();
-
-		final List<CompletableFuture<?>> futuresToComplete = Arrays.asList(inputFuture1, inputFuture2);
-		final FutureUtils.ConjunctFuture<Void> completeFuture = FutureUtils.completeAll(futuresToComplete);
-
-		assertThat(completeFuture.isDone(), is(false));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(0));
-		assertThat(completeFuture.getNumFuturesTotal(), is(futuresToComplete.size()));
-
-		final FlinkException testException1 = new FlinkException("Test exception 1");
-		inputFuture2.completeExceptionally(testException1);
-
-		assertThat(completeFuture.isDone(), is(false));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(1));
-
-		inputFuture1.complete("foobar");
-
-		assertThat(completeFuture.isDone(), is(true));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(2));
-
-		try {
-			completeFuture.get();
-			fail("Expected an exceptional completion");
-		} catch (ExecutionException ee) {
-			assertThat(ExceptionUtils.stripExecutionException(ee), is(testException1));
-		}
-	}
-
-	@Test
-	public void testCompleteAllExceptional() throws Exception {
-		final CompletableFuture<String> inputFuture1 = new CompletableFuture<>();
-		final CompletableFuture<Integer> inputFuture2 = new CompletableFuture<>();
-
-		final List<CompletableFuture<?>> futuresToComplete = Arrays.asList(inputFuture1, inputFuture2);
-		final FutureUtils.ConjunctFuture<Void> completeFuture = FutureUtils.completeAll(futuresToComplete);
-
-		assertThat(completeFuture.isDone(), is(false));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(0));
-		assertThat(completeFuture.getNumFuturesTotal(), is(futuresToComplete.size()));
-
-		final FlinkException testException1 = new FlinkException("Test exception 1");
-		inputFuture1.completeExceptionally(testException1);
-
-		assertThat(completeFuture.isDone(), is(false));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(1));
-
-		final FlinkException testException2 = new FlinkException("Test exception 2");
-		inputFuture2.completeExceptionally(testException2);
-
-		assertThat(completeFuture.isDone(), is(true));
-		assertThat(completeFuture.getNumFuturesCompleted(), is(2));
-
-		try {
-			completeFuture.get();
-			fail("Expected an exceptional completion");
-		} catch (ExecutionException ee) {
-			final Throwable actual = ExceptionUtils.stripExecutionException(ee);
-
-			final Throwable[] suppressed = actual.getSuppressed();
-			final FlinkException suppressedException;
-
-			if (actual.equals(testException1)) {
-				 suppressedException = testException2;
-			} else {
-				suppressedException = testException1;
-			}
-
-			assertThat(suppressed, is(not(emptyArray())));
-			assertThat(suppressed, arrayContaining(suppressedException));
-		}
-	}
-
-	@Test
-	public void testCancelWaitingConjunctFuture() {
-		cancelConjunctFuture(inputFutures -> FutureUtils.waitForAll(inputFutures));
-	}
-
-	@Test
-	public void testCancelResultConjunctFuture() {
-		cancelConjunctFuture(inputFutures -> FutureUtils.combineAll(inputFutures));
-	}
-
-	@Test
-	public void testCancelCompleteConjunctFuture() {
-		cancelConjunctFuture(inputFutures -> FutureUtils.completeAll(inputFutures));
-	}
-
-	private void cancelConjunctFuture(Function<Collection<? extends CompletableFuture<?>>, FutureUtils.ConjunctFuture<?>> conjunctFutureFactory) {
-		final int numInputFutures = 10;
-		final Collection<CompletableFuture<Void>> inputFutures = new ArrayList<>(numInputFutures);
-
-		for (int i = 0; i < numInputFutures; i++) {
-			inputFutures.add(new CompletableFuture<>());
-		}
-
-		final FutureUtils.ConjunctFuture<?> conjunctFuture = conjunctFutureFactory.apply(inputFutures);
-
-		conjunctFuture.cancel(false);
-
-		for (CompletableFuture<Void> inputFuture : inputFutures) {
-			assertThat(inputFuture.isCancelled(), is(true));
 		}
 	}
 }

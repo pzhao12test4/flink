@@ -145,7 +145,7 @@ public class SlotCountExceedingParallelismTest extends TestLogger {
 				for (int i = 0; i < numberOfTimesToSend; i++) {
 					writer.emit(subtaskIndex);
 				}
-				writer.flushAll();
+				writer.flush();
 			}
 			finally {
 				writer.clearBuffers();

@@ -22,6 +22,13 @@ bin=`cd "$bin"; pwd`
 
 . "$bin"/config.sh
 
+FLIP6=$1
+CLUSTER_TYPE=cluster
+
+if [[ "$FLIP6" == "flip6" ]]; then
+    CLUSTER_TYPE=flip6
+fi
+
 # Start the JobManager instance(s)
 shopt -s nocasematch
 if [[ $HIGH_AVAILABILITY == "zookeeper" ]]; then
@@ -33,19 +40,14 @@ if [[ $HIGH_AVAILABILITY == "zookeeper" ]]; then
     for ((i=0;i<${#MASTERS[@]};++i)); do
         master=${MASTERS[i]}
         webuiport=${WEBUIPORTS[i]}
-
-        if [ ${MASTERS_ALL_LOCALHOST} = true ] ; then
-            "${FLINK_BIN_DIR}"/jobmanager.sh start "${master}" "${webuiport}"
-        else
-            ssh -n $FLINK_SSH_OPTS $master -- "nohup /bin/bash -l \"${FLINK_BIN_DIR}/jobmanager.sh\" start ${master} ${webuiport} &"
-        fi
+        ssh -n $FLINK_SSH_OPTS $master -- "nohup /bin/bash -l \"${FLINK_BIN_DIR}/jobmanager.sh\" start $CLUSTER_TYPE ${master} ${webuiport} &"
     done
 
 else
     echo "Starting cluster."
 
     # Start single JobManager on this machine
-    "$FLINK_BIN_DIR"/jobmanager.sh start
+    "$FLINK_BIN_DIR"/jobmanager.sh start $CLUSTER_TYPE
 fi
 shopt -u nocasematch
 

@@ -106,11 +106,6 @@ public abstract class GenericCsvInputFormat<OT> extends DelimitedInputFormat<OT>
 		super(filePath, null);
 	}
 
-	@Override
-	public boolean supportsMultiPaths() {
-		return true;
-	}
-
 	// --------------------------------------------------------------------------------------------
 
 	public int getNumberOfFieldsTotal() {
@@ -341,13 +336,13 @@ public abstract class GenericCsvInputFormat<OT> extends DelimitedInputFormat<OT>
 	public void close() throws IOException {
 		if (this.invalidLineCount > 0) {
 			if (LOG.isWarnEnabled()) {
-				LOG.warn("In file \"" + currentSplit.getPath() + "\" (split start: " + this.splitStart + ") " + this.invalidLineCount +" invalid line(s) were skipped.");
+				LOG.warn("In file \""+ this.filePath + "\" (split start: " + this.splitStart + ") " + this.invalidLineCount +" invalid line(s) were skipped.");
 			}
 		}
 
 		if (this.commentCount > 0) {
 			if (LOG.isInfoEnabled()) {
-				LOG.info("In file \"" + currentSplit.getPath() + "\" (split start: " + this.splitStart + ") " + this.commentCount +" comment line(s) were skipped.");
+				LOG.info("In file \""+ this.filePath + "\" (split start: " + this.splitStart + ") " + this.commentCount +" comment line(s) were skipped.");
 			}
 		}
 		super.close();
@@ -389,7 +384,7 @@ public abstract class GenericCsvInputFormat<OT> extends DelimitedInputFormat<OT>
 						throw new ParseException("Line could not be parsed: '" + lineAsString + "'\n"
 								+ "ParserError " + parser.getErrorState() + " \n"
 								+ "Expect field types: "+fieldTypesToString() + " \n"
-								+ "in file: " + currentSplit.getPath());
+								+ "in file: " + filePath);
 					}
 				}
 				else if (startPos == limit
@@ -413,7 +408,7 @@ public abstract class GenericCsvInputFormat<OT> extends DelimitedInputFormat<OT>
 						String lineAsString = new String(bytes, offset, numBytes, getCharset());
 						throw new ParseException("Line could not be parsed: '" + lineAsString+"'\n"
 								+ "Expect field types: "+fieldTypesToString()+" \n"
-								+ "in file: " + currentSplit.getPath());
+								+ "in file: "+filePath);
 					} else {
 						return false;
 					}

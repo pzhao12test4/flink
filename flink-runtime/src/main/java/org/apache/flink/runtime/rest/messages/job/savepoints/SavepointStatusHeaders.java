@@ -19,10 +19,8 @@
 package org.apache.flink.runtime.rest.messages.job.savepoints;
 
 import org.apache.flink.runtime.rest.HttpMethodWrapper;
-import org.apache.flink.runtime.rest.handler.async.AsynchronousOperationStatusMessageHeaders;
 import org.apache.flink.runtime.rest.messages.EmptyRequestBody;
-import org.apache.flink.runtime.rest.messages.JobIDPathParameter;
-import org.apache.flink.runtime.rest.messages.TriggerIdPathParameter;
+import org.apache.flink.runtime.rest.messages.MessageHeaders;
 
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
 
@@ -30,14 +28,9 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseSt
  * These headers define the protocol for triggering a savepoint.
  */
 public class SavepointStatusHeaders
-		extends AsynchronousOperationStatusMessageHeaders<SavepointInfo, SavepointStatusMessageParameters> {
+		implements MessageHeaders<EmptyRequestBody, SavepointResponseBody, SavepointStatusMessageParameters> {
 
 	private static final SavepointStatusHeaders INSTANCE = new SavepointStatusHeaders();
-
-	private static final String URL = String.format(
-		"/jobs/:%s/savepoints/:%s",
-		JobIDPathParameter.KEY,
-		TriggerIdPathParameter.KEY);
 
 	private SavepointStatusHeaders() {
 	}
@@ -45,6 +38,11 @@ public class SavepointStatusHeaders
 	@Override
 	public Class<EmptyRequestBody> getRequestClass() {
 		return EmptyRequestBody.class;
+	}
+
+	@Override
+	public Class<SavepointResponseBody> getResponseClass() {
+		return SavepointResponseBody.class;
 	}
 
 	@Override
@@ -64,15 +62,10 @@ public class SavepointStatusHeaders
 
 	@Override
 	public String getTargetRestEndpointURL() {
-		return URL;
+		return "/jobs/:jobid/savepoints/:savepointtriggerid";
 	}
 
 	public static SavepointStatusHeaders getInstance() {
 		return INSTANCE;
-	}
-
-	@Override
-	protected Class<SavepointInfo> getValueClass() {
-		return SavepointInfo.class;
 	}
 }

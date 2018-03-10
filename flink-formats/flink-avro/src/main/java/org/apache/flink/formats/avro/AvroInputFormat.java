@@ -172,11 +172,6 @@ public class AvroInputFormat<E> extends FileInputFormat<E> implements ResultType
 		}
 	}
 
-	@Override
-	public boolean supportsMultiPaths() {
-		return true;
-	}
-
 	// --------------------------------------------------------------------------------------------
 	//  Checkpointing
 	// --------------------------------------------------------------------------------------------

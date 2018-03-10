@@ -32,9 +32,7 @@ import org.apache.flink.runtime.rest.util.RestMapperUtils;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonParseException;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JavaType;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.Bootstrap;
@@ -70,7 +68,6 @@ import javax.net.ssl.SSLEngine;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
-import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -154,7 +151,7 @@ public class RestClient {
 
 		String targetUrl = MessageParameters.resolveUrl(messageHeaders.getTargetRestEndpointURL(), messageParameters);
 
-		LOG.debug("Sending request of class {} to {}:{}{}", request.getClass(), targetAddress, targetPort, targetUrl);
+		LOG.debug("Sending request of class {} to {}", request.getClass(), targetUrl);
 		// serialize payload
 		StringWriter sw = new StringWriter();
 		objectMapper.writeValue(sw, request);
@@ -168,22 +165,10 @@ public class RestClient {
 			.set(HttpHeaders.Names.HOST, targetAddress + ':' + targetPort)
 			.set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.CLOSE);
 
-		final JavaType responseType;
-
-		final Collection<Class<?>> typeParameters = messageHeaders.getResponseTypeParameters();
-
-		if (typeParameters.isEmpty()) {
-			responseType = objectMapper.constructType(messageHeaders.getResponseClass());
-		} else {
-			responseType = objectMapper.getTypeFactory().constructParametricType(
-				messageHeaders.getResponseClass(),
-				typeParameters.toArray(new Class<?>[typeParameters.size()]));
-		}
-
-		return submitRequest(targetAddress, targetPort, httpRequest, responseType);
+		return submitRequest(targetAddress, targetPort, httpRequest, messageHeaders.getResponseClass());
 	}
 
-	private <P extends ResponseBody> CompletableFuture<P> submitRequest(String targetAddress, int targetPort, FullHttpRequest httpRequest, JavaType responseType) {
+	private <P extends ResponseBody> CompletableFuture<P> submitRequest(String targetAddress, int targetPort, FullHttpRequest httpRequest, Class<P> responseClass) {
 		final ChannelFuture connectFuture = bootstrap.connect(targetAddress, targetPort);
 
 		final CompletableFuture<Channel> channelFuture = new CompletableFuture<>();
@@ -207,17 +192,16 @@ public class RestClient {
 				},
 				executor)
 			.thenComposeAsync(
-				(JsonResponse rawResponse) -> parseResponse(rawResponse, responseType),
+				(JsonResponse rawResponse) -> parseResponse(rawResponse, responseClass),
 				executor);
 	}
 
-	private static <P extends ResponseBody> CompletableFuture<P> parseResponse(JsonResponse rawResponse, JavaType responseType) {
+	private static <P extends ResponseBody> CompletableFuture<P> parseResponse(JsonResponse rawResponse, Class<P> responseClass) {
 		CompletableFuture<P> responseFuture = new CompletableFuture<>();
-		final JsonParser jsonParser = objectMapper.treeAsTokens(rawResponse.json);
 		try {
-			P response = objectMapper.readValue(jsonParser, responseType);
+			P response = objectMapper.treeToValue(rawResponse.getJson(), responseClass);
 			responseFuture.complete(response);
-		} catch (IOException ioe) {
+		} catch (JsonProcessingException jpe) {
 			// the received response did not matched the expected response type
 
 			// lets see if it is an ErrorResponse instead
@@ -227,10 +211,10 @@ public class RestClient {
 			} catch (JsonProcessingException jpe2) {
 				// if this fails it is either the expected type or response type was wrong, most likely caused
 				// by a client/search MessageHeaders mismatch
-				LOG.error("Received response was neither of the expected type ({}) nor an error. Response={}", responseType, rawResponse, jpe2);
+				LOG.error("Received response was neither of the expected type ({}) nor an error. Response={}", responseClass, rawResponse, jpe2);
 				responseFuture.completeExceptionally(
 					new RestClientException(
-						"Response was neither of the expected type(" + responseType + ") nor an error.",
+						"Response was neither of the expected type(" + responseClass + ") nor an error.",
 						jpe2,
 						rawResponse.getHttpResponseStatus()));
 			}

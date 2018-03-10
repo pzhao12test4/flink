@@ -21,7 +21,6 @@ package org.apache.flink.runtime.rest;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.configuration.SecurityOptions;
-import org.apache.flink.configuration.WebOptions;
 import org.apache.flink.runtime.net.SSLUtils;
 import org.apache.flink.util.ConfigurationException;
 import org.apache.flink.util.Preconditions;
@@ -30,12 +29,6 @@ import javax.annotation.Nullable;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.UUID;
-
-import static java.util.Objects.requireNonNull;
-
 /**
  * A configuration object for {@link RestServerEndpoint}s.
  */
@@ -43,26 +36,16 @@ public final class RestServerEndpointConfiguration {
 
 	@Nullable
 	private final String restBindAddress;
-
 	private final int restBindPort;
-
 	@Nullable
 	private final SSLEngine sslEngine;
 
-	private final Path uploadDir;
-
-	private RestServerEndpointConfiguration(
-			@Nullable String restBindAddress,
-			int restBindPort,
-			@Nullable SSLEngine sslEngine,
-			final Path uploadDir) {
+	private RestServerEndpointConfiguration(@Nullable String restBindAddress, int restBindPort, @Nullable SSLEngine sslEngine) {
+		this.restBindAddress = restBindAddress;
 
 		Preconditions.checkArgument(0 <= restBindPort && restBindPort < 65536, "The bing rest port " + restBindPort + " is out of range (0, 65536[");
-
-		this.restBindAddress = restBindAddress;
 		this.restBindPort = restBindPort;
 		this.sslEngine = sslEngine;
-		this.uploadDir = requireNonNull(uploadDir);
 	}
 
 	/**
@@ -93,13 +76,6 @@ public final class RestServerEndpointConfiguration {
 	}
 
 	/**
-	 * Returns the directory used to temporarily store multipart/form-data uploads.
-	 */
-	public Path getUploadDir() {
-		return uploadDir;
-	}
-
-	/**
 	 * Creates and returns a new {@link RestServerEndpointConfiguration} from the given {@link Configuration}.
 	 *
 	 * @param config configuration from which the REST server endpoint configuration should be created from
@@ -127,10 +103,6 @@ public final class RestServerEndpointConfiguration {
 			}
 		}
 
-		final Path uploadDir = Paths.get(
-			config.getString(WebOptions.UPLOAD_DIR,	config.getString(WebOptions.TMP_DIR)),
-			"flink-web-upload-" + UUID.randomUUID());
-
-		return new RestServerEndpointConfiguration(address, port, sslEngine, uploadDir);
+		return new RestServerEndpointConfiguration(address, port, sslEngine);
 	}
 }

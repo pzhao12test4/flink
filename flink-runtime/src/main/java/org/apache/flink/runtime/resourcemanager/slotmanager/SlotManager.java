@@ -208,15 +208,11 @@ public class SlotManager implements AutoCloseable {
 		LOG.info("Suspending the SlotManager.");
 
 		// stop the timeout checks for the TaskManagers and the SlotRequests
-		if (taskManagerTimeoutCheck != null) {
-			taskManagerTimeoutCheck.cancel(false);
-			taskManagerTimeoutCheck = null;
-		}
+		taskManagerTimeoutCheck.cancel(false);
+		slotRequestTimeoutCheck.cancel(false);
 
-		if (slotRequestTimeoutCheck != null) {
-			slotRequestTimeoutCheck.cancel(false);
-			slotRequestTimeoutCheck = null;
-		}
+		taskManagerTimeoutCheck = null;
+		slotRequestTimeoutCheck = null;
 
 		for (PendingSlotRequest pendingSlotRequest : pendingSlotRequests.values()) {
 			cancelPendingSlotRequest(pendingSlotRequest);
@@ -296,13 +292,11 @@ public class SlotManager implements AutoCloseable {
 		PendingSlotRequest pendingSlotRequest = pendingSlotRequests.remove(allocationId);
 
 		if (null != pendingSlotRequest) {
-			LOG.debug("Cancel slot request {}.", allocationId);
-
 			cancelPendingSlotRequest(pendingSlotRequest);
 
 			return true;
 		} else {
-			LOG.debug("No pending slot request with allocation id {} found. Ignoring unregistration request.", allocationId);
+			LOG.debug("No pending slot request with allocation id {} found.", allocationId);
 
 			return false;
 		}
@@ -384,7 +378,7 @@ public class SlotManager implements AutoCloseable {
 	public boolean reportSlotStatus(InstanceID instanceId, SlotReport slotReport) {
 		checkInit();
 
-		LOG.debug("Received slot report from instance {}.", instanceId);
+		LOG.info("Received slot report from instance {}.", instanceId);
 
 		TaskManagerRegistration taskManagerRegistration = taskManagerRegistrations.get(instanceId);
 

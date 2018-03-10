@@ -233,13 +233,6 @@ class DecimalTypeTest extends ExpressionTestBase {
       "-f0",
       "-f0",
       "-123456789.123456789123456789")
-
-    testAllApis(
-      BigDecimal("1").toExpr / BigDecimal("3"),
-      "1p / 3p",
-      "CAST('1' AS DECIMAL) / CAST('3' AS DECIMAL)",
-      "0.3333333333333333333333333333333333"
-    )
   }
 
   @Test
@@ -294,7 +287,7 @@ class DecimalTypeTest extends ExpressionTestBase {
 
   // ----------------------------------------------------------------------------------------------
 
-  def testData: Row = {
+  def testData = {
     val testData = new Row(6)
     testData.setField(0, BigDecimal("123456789.123456789123456789").bigDecimal)
     testData.setField(1, BigDecimal("123456789123456789123456789").bigDecimal)
@@ -305,7 +298,7 @@ class DecimalTypeTest extends ExpressionTestBase {
     testData
   }
 
-  def typeInfo: TypeInformation[Any] = {
+  def typeInfo = {
     new RowTypeInfo(
       Types.DECIMAL,
       Types.DECIMAL,

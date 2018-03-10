@@ -23,7 +23,6 @@ import org.apache.flink.runtime.executiongraph.AccessExecutionGraph;
 import org.apache.flink.runtime.rest.handler.legacy.utils.ArchivedJobGenerationUtils;
 import org.apache.flink.runtime.webmonitor.history.ArchivedJson;
 import org.apache.flink.runtime.webmonitor.history.JsonArchivist;
-import org.apache.flink.util.TestLogger;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
@@ -39,7 +38,7 @@ import static org.mockito.Mockito.mock;
 /**
  * Tests for the JobAccumulatorsHandler.
  */
-public class JobAccumulatorsHandlerTest extends TestLogger {
+public class JobAccumulatorsHandlerTest {
 
 	@Test
 	public void testArchiver() throws Exception {

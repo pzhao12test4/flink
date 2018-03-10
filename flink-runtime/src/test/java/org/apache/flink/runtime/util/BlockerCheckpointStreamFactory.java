@@ -22,13 +22,12 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.core.testutils.OneShotLatch;
 import org.apache.flink.runtime.state.CheckpointStreamFactory;
-import org.apache.flink.runtime.state.CheckpointedStateScope;
 import org.apache.flink.runtime.state.memory.MemCheckpointStreamFactory;
 
 import java.io.IOException;
 
 /**
- * {@link CheckpointStreamFactory} for tests that allows for testing cancellation in async IO.
+ * {@link CheckpointStreamFactory} for tests that allows for testing cancellation in async IO
  */
 @VisibleForTesting
 @Internal
@@ -39,9 +38,9 @@ public class BlockerCheckpointStreamFactory implements CheckpointStreamFactory {
 	protected volatile OneShotLatch blocker;
 	protected volatile OneShotLatch waiter;
 
-	BlockingCheckpointOutputStream lastCreatedStream;
+	MemCheckpointStreamFactory.MemoryCheckpointOutputStream lastCreatedStream;
 
-	public BlockingCheckpointOutputStream getLastCreatedStream() {
+	public MemCheckpointStreamFactory.MemoryCheckpointOutputStream getLastCreatedStream() {
 		return lastCreatedStream;
 	}
 
@@ -70,13 +69,80 @@ public class BlockerCheckpointStreamFactory implements CheckpointStreamFactory {
 	}
 
 	@Override
-	public CheckpointStateOutputStream createCheckpointStateOutputStream(CheckpointedStateScope scope) throws IOException {
+	public MemCheckpointStreamFactory.MemoryCheckpointOutputStream createCheckpointStateOutputStream(long checkpointID, long timestamp) throws Exception {
+		this.lastCreatedStream = new MemCheckpointStreamFactory.MemoryCheckpointOutputStream(maxSize) {
 
-		this.lastCreatedStream = new BlockingCheckpointOutputStream(
-			new MemCheckpointStreamFactory.MemoryCheckpointOutputStream(maxSize),
-			waiter,
-			blocker,
-			afterNumberInvocations);
+			private int afterNInvocations = afterNumberInvocations;
+			private final OneShotLatch streamBlocker = blocker;
+			private final OneShotLatch streamWaiter = waiter;
+
+			@Override
+			public void write(int b) throws IOException {
+
+				unblockWaiter();
+
+				if (afterNInvocations > 0) {
+					--afterNInvocations;
+				} else {
+					awaitBlocker();
+				}
+
+				try {
+					super.write(b);
+				} catch (IOException ex) {
+					unblockWaiter();
+					throw ex;
+				}
+
+				if (0 == afterNInvocations) {
+					unblockWaiter();
+				}
+
+				// We also check for close here, in case the underlying stream does not do this
+				if (isClosed()) {
+					throw new IOException("Stream closed.");
+				}
+			}
+
+			//We override this to ensure that writes go through the blocking #write(int) method!
+			@Override
+			public void write(byte[] b, int off, int len) throws IOException {
+				for (int i = 0; i < len; i++) {
+					write(b[off + i]);
+				}
+			}
+
+			@Override
+			public void close() {
+				super.close();
+				// trigger all the latches, essentially all blocking ops on the stream should resume after close.
+				unblockAll();
+			}
+
+			private void unblockWaiter() {
+				if (null != streamWaiter) {
+					streamWaiter.trigger();
+				}
+			}
+
+			private void awaitBlocker() {
+				if (null != streamBlocker) {
+					try {
+						streamBlocker.await();
+					} catch (InterruptedException ignored) {
+					}
+				}
+			}
+
+			private void unblockAll() {
+				if (null != streamWaiter) {
+					streamWaiter.trigger();
+				}
+				if (null != streamBlocker) {
+					streamBlocker.trigger();
+				}
+			}
+		};
 
 		return lastCreatedStream;
 	}

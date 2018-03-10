@@ -23,7 +23,6 @@ import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.configuration.AkkaOptions;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.configuration.HighAvailabilityOptions;
 import org.apache.flink.configuration.TaskManagerOptions;
 import org.apache.flink.configuration.WebOptions;
@@ -143,41 +142,22 @@ public class TestBaseUtils extends TestLogger {
 		Configuration config,
 		boolean singleActorSystem) throws Exception {
 
-		if (!config.contains(WebOptions.LOG_PATH) || !config.containsKey(ConfigConstants.TASK_MANAGER_LOG_PATH_KEY)) {
-			logDir = File.createTempFile("TestBaseUtils-logdir", null);
-			Assert.assertTrue("Unable to delete temp file", logDir.delete());
-			Assert.assertTrue("Unable to create temp directory", logDir.mkdir());
-			Path logFile = Files.createFile(new File(logDir, "jobmanager.log").toPath());
-			Files.createFile(new File(logDir, "jobmanager.out").toPath());
+		logDir = File.createTempFile("TestBaseUtils-logdir", null);
+		Assert.assertTrue("Unable to delete temp file", logDir.delete());
+		Assert.assertTrue("Unable to create temp directory", logDir.mkdir());
+		Path logFile = Files.createFile(new File(logDir, "jobmanager.log").toPath());
+		Files.createFile(new File(logDir, "jobmanager.out").toPath());
 
-			if (!config.contains(WebOptions.LOG_PATH)) {
-				config.setString(WebOptions.LOG_PATH, logFile.toString());
-			}
+		config.setLong(TaskManagerOptions.MANAGED_MEMORY_SIZE, TASK_MANAGER_MEMORY_SIZE);
+		config.setBoolean(ConfigConstants.FILESYSTEM_DEFAULT_OVERWRITE_KEY, true);
 
-			if (!config.containsKey(ConfigConstants.TASK_MANAGER_LOG_PATH_KEY)) {
-				config.setString(ConfigConstants.TASK_MANAGER_LOG_PATH_KEY, logFile.toString());
-			}
-		}
+		config.setString(AkkaOptions.ASK_TIMEOUT, DEFAULT_AKKA_ASK_TIMEOUT + "s");
+		config.setString(AkkaOptions.STARTUP_TIMEOUT, DEFAULT_AKKA_STARTUP_TIMEOUT);
 
-		if (!config.contains(WebOptions.PORT)) {
-			config.setInteger(WebOptions.PORT, 8081);
-		}
+		config.setInteger(WebOptions.PORT, 8081);
+		config.setString(WebOptions.LOG_PATH, logFile.toString());
 
-		if (!config.contains(AkkaOptions.ASK_TIMEOUT)) {
-			config.setString(AkkaOptions.ASK_TIMEOUT, DEFAULT_AKKA_ASK_TIMEOUT + "s");
-		}
-
-		if (!config.contains(AkkaOptions.STARTUP_TIMEOUT)) {
-			config.setString(AkkaOptions.STARTUP_TIMEOUT, DEFAULT_AKKA_STARTUP_TIMEOUT);
-		}
-
-		if (!config.contains(CoreOptions.FILESYTEM_DEFAULT_OVERRIDE)) {
-			config.setBoolean(CoreOptions.FILESYTEM_DEFAULT_OVERRIDE, true);
-		}
-
-		if (!config.contains(TaskManagerOptions.MANAGED_MEMORY_SIZE)) {
-			config.setLong(TaskManagerOptions.MANAGED_MEMORY_SIZE, TASK_MANAGER_MEMORY_SIZE);
-		}
+		config.setString(ConfigConstants.TASK_MANAGER_LOG_PATH_KEY, logFile.toString());
 
 		LocalFlinkMiniCluster cluster =  new LocalFlinkMiniCluster(config, singleActorSystem);
 

@@ -36,7 +36,6 @@ import org.apache.flink.runtime.webmonitor.utils.WebFrontendBootstrap;
 import org.apache.flink.util.FileUtils;
 import org.apache.flink.util.FlinkException;
 import org.apache.flink.util.Preconditions;
-import org.apache.flink.util.ShutdownHookUtil;
 
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.router.Router;
 
@@ -182,10 +181,22 @@ public class HistoryServer {
 		long refreshIntervalMillis = config.getLong(HistoryServerOptions.HISTORY_SERVER_ARCHIVE_REFRESH_INTERVAL);
 		archiveFetcher = new HistoryServerArchiveFetcher(refreshIntervalMillis, refreshDirs, webDir, numFinishedPolls);
 
-		this.shutdownHook = ShutdownHookUtil.addShutdownHook(
-			HistoryServer.this::stop,
-			HistoryServer.class.getSimpleName(),
-			LOG);
+		this.shutdownHook = new Thread() {
+			@Override
+			public void run() {
+				HistoryServer.this.stop();
+			}
+		};
+		// add shutdown hook for deleting the directories and remaining temp files on shutdown
+		try {
+			Runtime.getRuntime().addShutdownHook(shutdownHook);
+		} catch (IllegalStateException e) {
+			// race, JVM is in shutdown already, we can safely ignore this
+			LOG.debug("Unable to add shutdown hook, shutdown already in progress", e);
+		} catch (Throwable t) {
+			// these errors usually happen when the shutdown is already in progress
+			LOG.warn("Error while adding shutdown hook", t);
+		}
 	}
 
 	@VisibleForTesting
@@ -252,8 +263,16 @@ public class HistoryServer {
 
 				LOG.info("Stopped history server.");
 
-				// Remove shutdown hook to prevent resource leaks
-				ShutdownHookUtil.removeShutdownHook(shutdownHook, getClass().getSimpleName(), LOG);
+				// Remove shutdown hook to prevent resource leaks, unless this is invoked by the shutdown hook itself
+				if (shutdownHook != null && shutdownHook != Thread.currentThread()) {
+					try {
+						Runtime.getRuntime().removeShutdownHook(shutdownHook);
+					} catch (IllegalStateException ignored) {
+						// race, JVM is in shutdown already, we can safely ignore this
+					} catch (Throwable t) {
+						LOG.warn("Exception while unregistering HistoryServer cleanup shutdown hook.");
+					}
+				}
 			}
 		}
 	}

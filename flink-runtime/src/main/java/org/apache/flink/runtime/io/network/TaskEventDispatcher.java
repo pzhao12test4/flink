@@ -102,10 +102,7 @@ public class TaskEventDispatcher {
 		checkNotNull(eventListener);
 		checkNotNull(eventType);
 
-		TaskEventHandler taskEventHandler;
-		synchronized (registeredHandlers) {
-			taskEventHandler = registeredHandlers.get(partitionId);
-		}
+		TaskEventHandler taskEventHandler = registeredHandlers.get(partitionId);
 		if (taskEventHandler == null) {
 			throw new IllegalStateException(
 				"Partition " + partitionId + " not registered at task event dispatcher.");
@@ -126,10 +123,7 @@ public class TaskEventDispatcher {
 		checkNotNull(partitionId);
 		checkNotNull(event);
 
-		TaskEventHandler taskEventHandler;
-		synchronized (registeredHandlers) {
-			taskEventHandler = registeredHandlers.get(partitionId);
-		}
+		TaskEventHandler taskEventHandler = registeredHandlers.get(partitionId);
 
 		if (taskEventHandler != null) {
 			taskEventHandler.publish(event);

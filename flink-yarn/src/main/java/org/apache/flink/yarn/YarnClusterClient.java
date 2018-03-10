@@ -148,7 +148,7 @@ public class YarnClusterClient extends ClusterClient<ApplicationId> {
 	}
 
 	@Override
-	public JobSubmissionResult submitJob(JobGraph jobGraph, ClassLoader classLoader) throws ProgramInvocationException {
+	protected JobSubmissionResult submitJob(JobGraph jobGraph, ClassLoader classLoader) throws ProgramInvocationException {
 		if (isDetached()) {
 			if (newlyCreatedCluster) {
 				stopAfterJob(jobGraph.getJobID());

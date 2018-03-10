@@ -199,7 +199,7 @@ public class ZooKeeperCompletedCheckpointStore implements CompletedCheckpointSto
 			}
 
 		} while (retrievedCheckpoints.size() != numberOfInitialCheckpoints &&
-			!CompletedCheckpoint.checkpointsMatch(lastTryRetrievedCheckpoints, retrievedCheckpoints));
+			!lastTryRetrievedCheckpoints.equals(retrievedCheckpoints));
 
 		// Clear local handles in order to prevent duplicates on
 		// recovery. The local handles should reflect the state

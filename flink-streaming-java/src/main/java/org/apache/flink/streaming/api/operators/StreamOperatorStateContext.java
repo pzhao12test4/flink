@@ -19,6 +19,7 @@
 package org.apache.flink.streaming.api.operators;
 
 import org.apache.flink.runtime.state.AbstractKeyedStateBackend;
+import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.KeyGroupStatePartitionStreamProvider;
 import org.apache.flink.runtime.state.OperatorStateBackend;
 import org.apache.flink.runtime.state.StatePartitionStreamProvider;
@@ -40,6 +41,7 @@ public interface StreamOperatorStateContext {
 	 */
 	OperatorStateBackend operatorStateBackend();
 
+
 	/**
 	 * Returns the keyed state backend for the stream operator. This method returns null for non-keyed operators.
 	 */
@@ -50,6 +52,11 @@ public interface StreamOperatorStateContext {
 	 * operators.
 	 */
 	InternalTimeServiceManager<?, ?> internalTimerServiceManager();
+
+	/**
+	 * Returns the checkpoint stream factory for the stream operator.
+	 */
+	CheckpointStreamFactory checkpointStreamFactory();
 
 	/**
 	 * Returns an iterable to obtain input streams for previously stored operator state partitions that are assigned to

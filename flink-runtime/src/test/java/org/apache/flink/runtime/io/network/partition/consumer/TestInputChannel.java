@@ -21,7 +21,6 @@ package org.apache.flink.runtime.io.network.partition.consumer;
 import org.apache.flink.runtime.io.network.api.EndOfPartitionEvent;
 import org.apache.flink.runtime.io.network.api.serialization.EventSerializer;
 import org.apache.flink.runtime.io.network.buffer.Buffer;
-import org.apache.flink.runtime.io.network.partition.consumer.InputChannel.BufferAndAvailability;
 import org.apache.flink.runtime.jobgraph.IntermediateResultPartitionID;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
@@ -29,7 +28,6 @@ import org.mockito.stubbing.Answer;
 import org.mockito.stubbing.OngoingStubbing;
 
 import java.io.IOException;
-import java.util.Optional;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.flink.util.Preconditions.checkNotNull;
@@ -46,7 +44,7 @@ public class TestInputChannel {
 	private final SingleInputGate inputGate;
 
 	// Abusing Mockito here... ;)
-	protected OngoingStubbing<Optional<BufferAndAvailability>> stubbing;
+	protected OngoingStubbing<InputChannel.BufferAndAvailability> stubbing;
 
 	public TestInputChannel(SingleInputGate inputGate, int channelIndex) {
 		checkArgument(channelIndex >= 0);
@@ -56,38 +54,30 @@ public class TestInputChannel {
 	}
 
 	public TestInputChannel read(Buffer buffer) throws IOException, InterruptedException {
-		return read(buffer, true);
-	}
-
-	public TestInputChannel read(Buffer buffer, boolean moreAvailable) throws IOException, InterruptedException {
 		if (stubbing == null) {
-			stubbing = when(mock.getNextBuffer()).thenReturn(Optional.of(new BufferAndAvailability(buffer, moreAvailable, 0)));
+			stubbing = when(mock.getNextBuffer()).thenReturn(new InputChannel.BufferAndAvailability(buffer, true, 0));
 		} else {
-			stubbing = stubbing.thenReturn(Optional.of(new BufferAndAvailability(buffer, moreAvailable, 0)));
+			stubbing = stubbing.thenReturn(new InputChannel.BufferAndAvailability(buffer, true, 0));
 		}
 
 		return this;
 	}
 
 	public TestInputChannel readBuffer() throws IOException, InterruptedException {
-		return readBuffer(true);
-	}
-
-	public TestInputChannel readBuffer(boolean moreAvailable) throws IOException, InterruptedException {
 		final Buffer buffer = mock(Buffer.class);
 		when(buffer.isBuffer()).thenReturn(true);
 
-		return read(buffer, moreAvailable);
+		return read(buffer);
 	}
 
 	public TestInputChannel readEndOfPartitionEvent() throws IOException, InterruptedException {
-		final Answer<Optional<BufferAndAvailability>> answer = new Answer<Optional<BufferAndAvailability>>() {
+		final Answer<InputChannel.BufferAndAvailability> answer = new Answer<InputChannel.BufferAndAvailability>() {
 			@Override
-			public Optional<BufferAndAvailability> answer(InvocationOnMock invocationOnMock) throws Throwable {
+			public InputChannel.BufferAndAvailability answer(InvocationOnMock invocationOnMock) throws Throwable {
 				// Return true after finishing
 				when(mock.isReleased()).thenReturn(true);
 
-				return Optional.of(new BufferAndAvailability(EventSerializer.toBuffer(EndOfPartitionEvent.INSTANCE), false, 0));
+				return new InputChannel.BufferAndAvailability(EventSerializer.toBuffer(EndOfPartitionEvent.INSTANCE), false, 0);
 			}
 		};
 
